@@ -8,13 +8,7 @@ It does **not** change the selected model, thinking level, tools, or prompts.
 
 ## Install
 
-Install from this Git repository:
-
-```bash
-pi install git:<your-git-host>/<your-user>/pi-better-openai
-```
-
-Or install from a local checkout:
+Install from a local checkout:
 
 ```bash
 pi install /path/to/pi-better-openai
@@ -52,10 +46,11 @@ Commands:
 - `/usage refresh` refetches usage immediately.
 - `/usage on` / `/usage off` toggles usage display.
 - `/openai-status` shows fast mode, usage, footer mode, and config path.
+- `/openai-config`, `/openai-config path`, and `/openai-config print` show config locations or contents.
 - `/openai-footer replace|status|off` controls how the extension renders footer UI.
 - `/fast-footer replace|status|off` is kept as an alias.
 
-Fast mode can only be enabled while the current model is one of the configured supported models. If you try `/fast on` with an unsupported model, the extension warns and leaves fast mode off.
+Fast mode has separate desired/effective state. If you run `/fast on` with an unsupported model, the extension remembers that fast mode is desired, warns that the current model is unsupported, and leaves effective fast mode off until you switch to a supported model.
 
 The footer usage display is fetched from `https://chatgpt.com/backend-api/wham/usage` using the `openai-codex` OAuth entry in `~/.pi/agent/auth.json` (or `$PI_CODING_AGENT_DIR/auth.json`). It refreshes on startup, after turns, on model changes, and every configured interval.
 
@@ -78,6 +73,7 @@ If no config exists, the extension writes a default global config.
 {
   "persistState": true,
   "active": false,
+  "desiredActive": false,
   "supportedModels": [
     "openai/gpt-5.4",
     "openai/gpt-5.5",
@@ -97,7 +93,8 @@ If no config exists, the extension writes a default global config.
 ```
 
 - `persistState`: persist `/fast on|off` across sessions.
-- `active`: startup state when `persistState` is true.
+- `active`: last effective runtime state.
+- `desiredActive`: desired fast-mode state; if true, fast activates automatically when the current model supports it.
 - `supportedModels`: exact `provider/model-id` keys that should receive `service_tier: "priority"`. Defaults are limited to the Codex Fast Mode supported models documented by OpenAI: GPT-5.5 and GPT-5.4. OpenAI's Codex config docs mention `service_tier = "fast"`, but Codex implementation/issues show the request payload uses the priority service tier for Fast Mode.
 - `usage.enabled`: fetch and display subscription usage.
 - `usage.refreshIntervalMs`: usage refresh interval, clamped between 15 seconds and 10 minutes.
@@ -111,10 +108,13 @@ If no config exists, the extension writes a default global config.
 npm test
 ```
 
-The extension is split into a small identity module plus the main extension entry point:
+The extension is split into a few small modules plus the main extension entry point:
 
 - `extensions/identity.ts` owns package identity, config filename, and status key constants.
-- `extensions/index.ts` owns commands, config, usage fetching, fast mode injection, and footer rendering.
+- `extensions/config.ts` owns config types, defaults, migration, parsing, resolving, and raw-preserving writes.
+- `extensions/usage.ts` owns Codex auth reading, usage endpoint fetching, usage parsing, and usage formatting.
+- `extensions/format.ts` owns footer text formatting helpers.
+- `extensions/index.ts` wires commands, fast-mode state, usage refresh, provider-request injection, events, and footer rendering.
 
 ## Package layout
 

@@ -4,217 +4,46 @@
  * Adds `service_tier: "priority"` to OpenAI provider payloads while fast mode is
  * enabled and the selected model is in the configured allow-list.
  */
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
-import { dirname, join } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
-import { CONFIG_BASENAME, logPrefix, STATUS_KEY } from "./identity.ts";
+import { CONFIG_BASENAME, STATUS_KEY } from "./identity.ts";
+import { formatTokens, sanitizeStatusText, truncateToWidth, visibleWidth } from "./format.ts";
+import {
+  DEFAULT_CONFIG,
+  DEFAULT_SUPPORTED_MODELS,
+  FOOTER_MODES,
+  configPaths,
+  type FooterMode,
+  type ResolvedConfig,
+  type SupportedModel,
+  isRecord,
+  parseModelKey,
+  normalizeModelKeys,
+  parseModels,
+  readRawConfig,
+  resolveConfig,
+  writeConfig
+} from "./config.ts";
+import {
+  AUTH_FILE,
+  type UsageSnapshot,
+  formatPercent,
+  formatResetCountdown,
+  formatUsageSnapshot,
+  parseUsageSnapshot,
+  readCodexAuth,
+  requestCodexUsage
+} from "./usage.ts";
 
 const COMMAND = "fast";
 const USAGE_COMMAND = "usage";
 const FOOTER_COMMAND = "fast-footer";
 const OPENAI_FOOTER_COMMAND = "openai-footer";
 const OPENAI_STATUS_COMMAND = "openai-status";
+const OPENAI_CONFIG_COMMAND = "openai-config";
 const FLAG = "fast";
 const SERVICE_TIER = "priority";
 const COMMAND_ARGS = ["on", "off", "status", "models", "debug"] as const;
 const USAGE_COMMAND_ARGS = ["status", "refresh", "on", "off"] as const;
-const FOOTER_MODES = ["replace", "status", "off"] as const;
-
-const DEFAULT_SUPPORTED_MODELS = [
-  "openai/gpt-5.4",
-  "openai/gpt-5.5",
-  "openai-codex/gpt-5.4",
-  "openai-codex/gpt-5.5"
-] as const;
-
-type FooterMode = typeof FOOTER_MODES[number];
-
-type UsageConfig = {
-  enabled?: boolean;
-  refreshIntervalMs?: number;
-  showOnlyOnSubscriptionModels?: boolean;
-  showResetTimes?: boolean;
-};
-
-type FooterConfig = {
-  mode?: FooterMode;
-};
-
-interface ConfigFile {
-  persistState?: boolean;
-  active?: boolean;
-  supportedModels?: string[];
-  usage?: UsageConfig;
-  footer?: FooterConfig;
-}
-
-interface SupportedModel {
-  provider: string;
-  id: string;
-}
-
-interface ResolvedConfig {
-  configPath: string;
-  persistState: boolean;
-  active: boolean;
-  supportedModels: SupportedModel[];
-  usage: Required<UsageConfig>;
-  footer: Required<FooterConfig>;
-}
-
-type UsageWindow = {
-  used_percent?: number | null;
-  reset_after_seconds?: number | null;
-  reset_at?: number | null;
-};
-
-type RateLimitBucket = {
-  allowed?: boolean;
-  limit_reached?: boolean;
-  primary_window?: UsageWindow | null;
-  secondary_window?: UsageWindow | null;
-};
-
-type CodexUsageResponse = {
-  rate_limit?: RateLimitBucket | null;
-  additional_rate_limits?: Record<string, unknown> | unknown[] | null;
-};
-
-type UsageSnapshot = {
-  fiveHourLeftPercent: number | null;
-  sevenDayLeftPercent: number | null;
-  fiveHourResetInSeconds: number | null;
-  sevenDayResetInSeconds: number | null;
-  isLimited: boolean;
-};
-
-const DEFAULT_USAGE_CONFIG: Required<UsageConfig> = {
-  enabled: true,
-  refreshIntervalMs: 60_000,
-  showOnlyOnSubscriptionModels: true,
-  showResetTimes: true
-};
-
-const DEFAULT_FOOTER_CONFIG: Required<FooterConfig> = {
-  mode: "replace"
-};
-
-const DEFAULT_CONFIG: ConfigFile = {
-  persistState: true,
-  active: false,
-  supportedModels: [...DEFAULT_SUPPORTED_MODELS],
-  usage: DEFAULT_USAGE_CONFIG,
-  footer: DEFAULT_FOOTER_CONFIG
-};
-
-const AGENT_DIR = process.env.PI_CODING_AGENT_DIR?.trim() || join(homedir(), ".pi", "agent");
-const AUTH_FILE = join(AGENT_DIR, "auth.json");
-const USAGE_URL = "https://chatgpt.com/backend-api/wham/usage";
-const SPARK_MODEL_ID = "gpt-5.3-codex-spark";
-const SPARK_LIMIT_NAME = "GPT-5.3-Codex-Spark";
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function configPaths(cwd: string, home = homedir()) {
-  return {
-    project: join(cwd, ".pi", "extensions", CONFIG_BASENAME),
-    global: join(home, ".pi", "agent", "extensions", CONFIG_BASENAME)
-  };
-}
-
-function parseModelKey(value: string): SupportedModel | undefined {
-  const key = value.trim();
-  const slash = key.indexOf("/");
-  if (slash <= 0 || slash === key.length - 1) return undefined;
-  const provider = key.slice(0, slash).trim();
-  const id = key.slice(slash + 1).trim();
-  return provider && id ? { provider, id } : undefined;
-}
-
-function normalizeModelKeys(value: unknown): string[] | undefined {
-  if (value === undefined) return undefined;
-  if (!Array.isArray(value)) return undefined;
-  return value
-    .filter((entry): entry is string => typeof entry === "string")
-    .map((entry) => parseModelKey(entry))
-    .filter((entry): entry is SupportedModel => entry !== undefined)
-    .map((entry) => `${entry.provider}/${entry.id}`);
-}
-
-function parseModels(value: unknown): SupportedModel[] | undefined {
-  const keys = normalizeModelKeys(value);
-  if (keys === undefined) return undefined;
-  return keys.map((key) => parseModelKey(key)).filter((entry): entry is SupportedModel => entry !== undefined);
-}
-
-function readConfig(path: string): ConfigFile | undefined {
-  if (!existsSync(path)) return undefined;
-  try {
-    const parsed = JSON.parse(readFileSync(path, "utf8")) as unknown;
-    if (!isRecord(parsed)) return {};
-    const config: ConfigFile = {};
-    if (typeof parsed.persistState === "boolean") config.persistState = parsed.persistState;
-    if (typeof parsed.active === "boolean") config.active = parsed.active;
-    const supportedModels = normalizeModelKeys(parsed.supportedModels);
-    if (supportedModels !== undefined) config.supportedModels = supportedModels;
-    if (isRecord(parsed.usage)) {
-      config.usage = {};
-      if (typeof parsed.usage.enabled === "boolean") config.usage.enabled = parsed.usage.enabled;
-      if (typeof parsed.usage.refreshIntervalMs === "number") config.usage.refreshIntervalMs = parsed.usage.refreshIntervalMs;
-      if (typeof parsed.usage.showOnlyOnSubscriptionModels === "boolean") config.usage.showOnlyOnSubscriptionModels = parsed.usage.showOnlyOnSubscriptionModels;
-      if (typeof parsed.usage.showResetTimes === "boolean") config.usage.showResetTimes = parsed.usage.showResetTimes;
-    }
-    if (isRecord(parsed.footer) && typeof parsed.footer.mode === "string" && (FOOTER_MODES as readonly string[]).includes(parsed.footer.mode)) {
-      config.footer = { mode: parsed.footer.mode as FooterMode };
-    }
-    return config;
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    console.warn(`${logPrefix()} Failed to read ${path}: ${message}`);
-    return undefined;
-  }
-}
-
-function writeConfig(path: string, config: ConfigFile): void {
-  try {
-    mkdirSync(dirname(path), { recursive: true });
-    writeFileSync(path, `${JSON.stringify(config, null, 2)}\n`, "utf8");
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    console.warn(`${logPrefix()} Failed to write ${path}: ${message}`);
-  }
-}
-
-function resolveConfig(cwd: string): ResolvedConfig {
-  const paths = configPaths(cwd);
-  if (!existsSync(paths.project) && !existsSync(paths.global)) writeConfig(paths.global, DEFAULT_CONFIG);
-
-  const globalConfig = readConfig(paths.global) ?? {};
-  const projectConfig = readConfig(paths.project) ?? {};
-  const merged = { ...DEFAULT_CONFIG, ...globalConfig, ...projectConfig };
-  const selectedPath = existsSync(paths.project) ? paths.project : paths.global;
-
-  return {
-    configPath: selectedPath,
-    persistState: merged.persistState ?? true,
-    active: merged.active ?? false,
-    supportedModels: parseModels(merged.supportedModels) ?? parseModels(DEFAULT_SUPPORTED_MODELS) ?? [],
-    usage: {
-      ...DEFAULT_USAGE_CONFIG,
-      ...(globalConfig.usage ?? {}),
-      ...(projectConfig.usage ?? {}),
-      refreshIntervalMs: Math.max(15_000, Math.min(10 * 60_000, projectConfig.usage?.refreshIntervalMs ?? globalConfig.usage?.refreshIntervalMs ?? DEFAULT_USAGE_CONFIG.refreshIntervalMs))
-    },
-    footer: {
-      ...DEFAULT_FOOTER_CONFIG,
-      ...(globalConfig.footer ?? {}),
-      ...(projectConfig.footer ?? {})
-    }
-  };
-}
 
 function currentModelKey(ctx: ExtensionContext): string {
   return ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : "none";
@@ -231,177 +60,9 @@ function modelList(supportedModels: SupportedModel[]): string {
     : "none configured";
 }
 
-function stateText(ctx: ExtensionContext, active: boolean, supportedModels: SupportedModel[]): string {
+function stateText(ctx: ExtensionContext, active: boolean, _supportedModels: SupportedModel[]): string {
   const model = currentModelKey(ctx);
-  if (!active) return `Fast mode is off. Current model: ${model}.`;
-  if (supportsFast(ctx, supportedModels)) return `Fast mode is on for ${model}.`;
-  return `Fast mode is on, but ${model} is not configured for fast mode. Supported models: ${modelList(supportedModels)}.`;
-}
-
-function stripAnsi(value: string): string {
-  return value.replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, "");
-}
-
-function visibleWidth(value: string): number {
-  return stripAnsi(value).length;
-}
-
-function truncateToWidth(value: string, width: number, ellipsis = "..."): string {
-  if (visibleWidth(value) <= width) return value;
-  if (width <= 0) return "";
-  const plain = stripAnsi(value);
-  if (width <= ellipsis.length) return ellipsis.slice(0, width);
-  return `${plain.slice(0, Math.max(0, width - ellipsis.length))}${ellipsis}`;
-}
-
-function formatTokens(count: number): string {
-  if (count < 1000) return count.toString();
-  if (count < 10000) return `${(count / 1000).toFixed(1)}k`;
-  if (count < 1000000) return `${Math.round(count / 1000)}k`;
-  if (count < 10000000) return `${(count / 1000000).toFixed(1)}M`;
-  return `${Math.round(count / 1000000)}M`;
-}
-
-function sanitizeStatusText(text: string): string {
-  return text.replace(/[\r\n\t]/g, " ").replace(/ +/g, " ").trim();
-}
-
-function clampPercent(value: number): number {
-  return Math.min(100, Math.max(0, value));
-}
-
-function usedToLeftPercent(value: number | null | undefined): number | null {
-  if (typeof value !== "number" || Number.isNaN(value)) return null;
-  return clampPercent(100 - value);
-}
-
-function formatResetCountdown(seconds: number | null): string | null {
-  if (typeof seconds !== "number" || Number.isNaN(seconds)) return null;
-  const total = Math.max(0, Math.round(seconds));
-  const days = Math.floor(total / 86_400);
-  const hours = Math.floor((total % 86_400) / 3_600);
-  const minutes = Math.floor((total % 3_600) / 60);
-  const secs = total % 60;
-  if (days > 0) return `${days}d${hours}h`;
-  if (hours > 0) return `${hours}h${minutes}m`;
-  if (minutes > 0) return `${minutes}m`;
-  return `${secs}s`;
-}
-
-function formatResetClock(seconds: number | null, options?: { includeDate?: boolean }): string | null {
-  if (typeof seconds !== "number" || Number.isNaN(seconds)) return null;
-  const resetDate = new Date(Date.now() + Math.max(0, seconds) * 1000);
-  const now = new Date();
-  const time = resetDate.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
-  if (!options?.includeDate && resetDate.toDateString() === now.toDateString()) return time;
-  const weekday = resetDate.toLocaleDateString(undefined, { weekday: "short" });
-  if (!options?.includeDate) return `${weekday} ${time}`;
-  const date = resetDate.toLocaleDateString(undefined, { month: "numeric", day: "numeric" });
-  return `${weekday} ${date} ${time}`;
-}
-
-function formatCompactReset(label: string, seconds: number | null, options?: { includeDate?: boolean }): string | null {
-  const countdown = formatResetCountdown(seconds);
-  const clock = formatResetClock(seconds, options);
-  return countdown && clock ? `${label}↺${countdown} - ${clock}` : null;
-}
-
-function readCodexAuth(): { accessToken: string; accountId: string } | undefined {
-  try {
-    const auth = JSON.parse(readFileSync(AUTH_FILE, "utf8")) as Record<string, { type?: string; access?: string | null; accountId?: string | null; account_id?: string | null } | undefined>;
-    const entry = auth["openai-codex"];
-    if (entry?.type !== "oauth") return undefined;
-    const accessToken = entry.access?.trim();
-    const accountId = (entry.accountId ?? entry.account_id)?.trim();
-    return accessToken && accountId ? { accessToken, accountId } : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-async function requestCodexUsage(): Promise<CodexUsageResponse | undefined> {
-  const credentials = readCodexAuth();
-  if (!credentials) return undefined;
-  const response = await fetch(USAGE_URL, {
-    headers: {
-      accept: "*/*",
-      authorization: `Bearer ${credentials.accessToken}`,
-      "chatgpt-account-id": credentials.accountId
-    }
-  });
-  if (!response.ok) throw new Error(`Codex usage request failed (${response.status})`);
-  return (await response.json()) as CodexUsageResponse;
-}
-
-function asObject(value: unknown): Record<string, unknown> | null {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
-  return value as Record<string, unknown>;
-}
-
-function normalizeRateLimitBucket(value: unknown): RateLimitBucket | null {
-  const record = asObject(value);
-  if (!record) return null;
-  if (!("primary_window" in record || "secondary_window" in record || "limit_reached" in record || "allowed" in record)) return null;
-  return record as RateLimitBucket;
-}
-
-function extractSparkRateLimitFromEntry(value: unknown): RateLimitBucket | null {
-  const record = asObject(value);
-  if (!record || record.limit_name !== SPARK_LIMIT_NAME) return null;
-  return normalizeRateLimitBucket(record.rate_limit);
-}
-
-function findSparkRateLimitBucket(data: CodexUsageResponse): RateLimitBucket | null {
-  const additional = data.additional_rate_limits;
-  if (Array.isArray(additional)) {
-    for (const entry of additional) {
-      const bucket = extractSparkRateLimitFromEntry(entry);
-      if (bucket) return bucket;
-    }
-  } else {
-    const map = asObject(additional);
-    if (map) {
-      for (const value of Object.values(map)) {
-        const bucket = extractSparkRateLimitFromEntry(value);
-        if (bucket) return bucket;
-      }
-    }
-  }
-  return null;
-}
-
-function getResetSeconds(window: UsageWindow | null | undefined): number | null {
-  if (typeof window?.reset_after_seconds === "number" && !Number.isNaN(window.reset_after_seconds)) return window.reset_after_seconds;
-  if (typeof window?.reset_at !== "number" || Number.isNaN(window.reset_at)) return null;
-  const resetAtSeconds = window.reset_at > 100_000_000_000 ? window.reset_at / 1000 : window.reset_at;
-  return Math.max(0, resetAtSeconds - Date.now() / 1000);
-}
-
-function parseUsageSnapshot(data: CodexUsageResponse, modelId: string | undefined): UsageSnapshot {
-  const bucket = modelId === SPARK_MODEL_ID ? findSparkRateLimitBucket(data) : normalizeRateLimitBucket(data.rate_limit);
-  return {
-    fiveHourLeftPercent: usedToLeftPercent(bucket?.primary_window?.used_percent),
-    sevenDayLeftPercent: usedToLeftPercent(bucket?.secondary_window?.used_percent),
-    fiveHourResetInSeconds: getResetSeconds(bucket?.primary_window),
-    sevenDayResetInSeconds: getResetSeconds(bucket?.secondary_window),
-    isLimited: bucket?.limit_reached === true || bucket?.allowed === false
-  };
-}
-
-function formatPercent(value: number | null): string {
-  return typeof value === "number" && !Number.isNaN(value) ? `${Math.round(clampPercent(value))}% left` : "--";
-}
-
-function formatUsageSnapshot(snapshot: UsageSnapshot, options: { showResetTimes: boolean }): string {
-  const fiveHour = formatPercent(snapshot.fiveHourLeftPercent);
-  const sevenDay = formatPercent(snapshot.sevenDayLeftPercent);
-  const resets = options.showResetTimes
-    ? [
-        formatCompactReset("5h", snapshot.fiveHourResetInSeconds),
-        formatCompactReset("7d", snapshot.sevenDayResetInSeconds, { includeDate: true })
-      ].filter((value): value is string => value !== null)
-    : [];
-  return `Usage: 5h: ${fiveHour} | 7d: ${sevenDay}${resets.length ? ` | ${resets.join(" | ")}` : ""}`;
+  return active ? `Fast mode is on for ${model}.` : `Fast mode is off. Current model: ${model}.`;
 }
 
 function isOpenAISubscriptionModel(ctx: ExtensionContext, cfg: ResolvedConfig): boolean {
@@ -410,12 +71,18 @@ function isOpenAISubscriptionModel(ctx: ExtensionContext, cfg: ResolvedConfig): 
 }
 
 export default function betterOpenAI(pi: ExtensionAPI): void {
+  let desiredActive = false;
   let active = false;
   let cachedConfig: ResolvedConfig | undefined;
   let usageSnapshot: UsageSnapshot | undefined;
   let usageUpdatedAt: number | undefined;
   let usageError: string | undefined;
   let usageTimer: ReturnType<typeof setInterval> | undefined;
+  let footerTotals = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0 };
+  let usageRefreshInFlight = false;
+  let queuedUsageRefresh: { ctx: ExtensionContext; modelId?: string; notify?: boolean } | undefined;
+  let footerInstalled = false;
+  let requestFooterRender: (() => void) | undefined;
   let lastInjectedAt: number | undefined;
   let lastInjectedModel: string | undefined;
   let lastInjectedTier: string | undefined;
@@ -430,34 +97,46 @@ export default function betterOpenAI(pi: ExtensionAPI): void {
   }
 
   function persist(nextConfig: ResolvedConfig): void {
-    cachedConfig = { ...nextConfig, active };
+    cachedConfig = { ...nextConfig, active, desiredActive };
     if (!nextConfig.persistState) return;
-    writeConfig(nextConfig.configPath, { ...(readConfig(nextConfig.configPath) ?? {}), active });
+    writeConfig(nextConfig.configPath, { ...readRawConfig(nextConfig.configPath), active, desiredActive });
+  }
+
+  function applyDesiredFastState(ctx: ExtensionContext, cfg = config(ctx)): void {
+    active = desiredActive && supportsFast(ctx, cfg.supportedModels);
   }
 
   function setActive(ctx: ExtensionContext, next: boolean): void {
     const nextConfig = refresh(ctx);
-    if (next && !supportsFast(ctx, nextConfig.supportedModels)) {
-      ctx.ui.notify(`Fast mode cannot be enabled for ${currentModelKey(ctx)}. Supported models: ${modelList(nextConfig.supportedModels)}.`, "warning");
-      return;
-    }
-    active = next;
+    desiredActive = next;
+    applyDesiredFastState(ctx, nextConfig);
     persist(nextConfig);
     updateFooter(ctx);
+    if (next && !active) {
+      ctx.ui.notify(`Fast mode requested, but ${currentModelKey(ctx)} is unsupported. It will activate automatically when you switch to a supported model: ${modelList(nextConfig.supportedModels)}.`, "warning");
+      return;
+    }
     ctx.ui.notify(stateText(ctx, active, nextConfig.supportedModels), "info");
   }
 
   async function refreshUsage(ctx: ExtensionContext, modelId = ctx.model?.id, options?: { notify?: boolean }): Promise<void> {
     if (!ctx.hasUI) return;
-    const cfg = config(ctx);
-    if (!cfg.usage.enabled) {
-      usageSnapshot = undefined;
-      usageError = "Usage display is disabled.";
-      updateFooter(ctx);
+    if (usageRefreshInFlight) {
+      queuedUsageRefresh = { ctx, modelId, notify: queuedUsageRefresh?.notify || options?.notify };
       return;
     }
+    usageRefreshInFlight = true;
+    const cfg = config(ctx);
     try {
-      const data = await requestCodexUsage();
+      if (!cfg.usage.enabled) {
+        usageSnapshot = undefined;
+        usageError = "Usage display is disabled.";
+        updateFooter(ctx);
+        return;
+      }
+      const timeoutSignal = AbortSignal.timeout(10_000);
+      const signal = ctx.signal ? AbortSignal.any([ctx.signal, timeoutSignal]) : timeoutSignal;
+      const data = await requestCodexUsage(signal);
       usageSnapshot = data ? parseUsageSnapshot(data, modelId) : undefined;
       usageUpdatedAt = usageSnapshot ? Date.now() : undefined;
       usageError = data ? undefined : `Missing openai-codex OAuth credentials in ${AUTH_FILE}.`;
@@ -467,6 +146,13 @@ export default function betterOpenAI(pi: ExtensionAPI): void {
       usageError = error instanceof Error ? error.message : String(error);
       updateFooter(ctx);
       if (options?.notify) ctx.ui.notify(formatUsageStatus(ctx), "warning");
+    } finally {
+      usageRefreshInFlight = false;
+      if (queuedUsageRefresh) {
+        const next = queuedUsageRefresh;
+        queuedUsageRefresh = undefined;
+        void refreshUsage(next.ctx, next.modelId, { notify: next.notify });
+      }
     }
   }
 
@@ -477,6 +163,18 @@ export default function betterOpenAI(pi: ExtensionAPI): void {
     void refreshUsage(ctx);
     usageTimer = setInterval(() => void refreshUsage(ctx), cfg.usage.refreshIntervalMs);
     usageTimer.unref?.();
+  }
+
+  function refreshFooterTotals(ctx: ExtensionContext): void {
+    footerTotals = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0 };
+    for (const entry of ctx.sessionManager.getEntries()) {
+      if (entry.type !== "message" || entry.message.role !== "assistant") continue;
+      footerTotals.input += entry.message.usage.input;
+      footerTotals.output += entry.message.usage.output;
+      footerTotals.cacheRead += entry.message.usage.cacheRead;
+      footerTotals.cacheWrite += entry.message.usage.cacheWrite;
+      footerTotals.cost += entry.message.usage.cost.total;
+    }
   }
 
   function formatUsageStatus(ctx: ExtensionContext): string {
@@ -499,6 +197,7 @@ export default function betterOpenAI(pi: ExtensionAPI): void {
   function formatDebugStatus(ctx: ExtensionContext): string {
     const cfg = config(ctx);
     return [
+      `Fast desired: ${desiredActive}`,
       `Fast active: ${active}`,
       `Current model: ${currentModelKey(ctx)}`,
       `Supported model: ${supportsFast(ctx, cfg.supportedModels)}`,
@@ -528,7 +227,7 @@ export default function betterOpenAI(pi: ExtensionAPI): void {
     },
     handler: async (args, ctx) => {
       const arg = args.trim().toLowerCase();
-      if (!arg) return setActive(ctx, !active);
+      if (!arg) return setActive(ctx, !desiredActive);
       if (arg === "on") return setActive(ctx, true);
       if (arg === "off") return setActive(ctx, false);
       if (arg === "status") {
@@ -554,6 +253,32 @@ export default function betterOpenAI(pi: ExtensionAPI): void {
     }
   });
 
+  pi.registerCommand(OPENAI_CONFIG_COMMAND, {
+    description: "Show Better OpenAI config paths and selected config",
+    getArgumentCompletions: (prefix) => {
+      const items = ["path", "print"].filter((arg) => arg.startsWith(prefix)).map((arg) => ({ value: arg, label: arg }));
+      return items.length ? items : null;
+    },
+    handler: async (args, ctx) => {
+      const cfg = refresh(ctx);
+      const arg = args.trim().toLowerCase();
+      if (arg === "path") {
+        ctx.ui.notify(cfg.configPath, "info");
+        return;
+      }
+      if (arg === "print") {
+        ctx.ui.notify(JSON.stringify(readRawConfig(cfg.configPath), null, 2), "info");
+        return;
+      }
+      ctx.ui.notify([
+        `Selected config: ${cfg.configPath}`,
+        `Project config: ${cfg.projectConfigExists ? "found" : "not found"} (${cfg.projectConfigPath})`,
+        `Global config: ${cfg.globalConfigExists ? "found" : "not found"} (${cfg.globalConfigPath})`,
+        "Usage: /openai-config [path|print]"
+      ].join("\n"), "info");
+    }
+  });
+
   pi.registerCommand(USAGE_COMMAND, {
     description: "Show, refresh, enable, or disable OpenAI subscription usage in the footer",
     getArgumentCompletions: (prefix) => {
@@ -566,8 +291,9 @@ export default function betterOpenAI(pi: ExtensionAPI): void {
       if (arg === "status") return ctx.ui.notify(formatUsageStatus(ctx), usageSnapshot ? "info" : "warning");
       if (arg === "refresh") return refreshUsage(ctx, ctx.model?.id, { notify: true });
       if (arg === "on" || arg === "off") {
-        const current = readConfig(cfg.configPath) ?? {};
-        const nextUsage = { ...(current.usage ?? {}), enabled: arg === "on" };
+        const current = readRawConfig(cfg.configPath);
+        const currentUsage = isRecord(current.usage) ? current.usage : {};
+        const nextUsage = { ...currentUsage, enabled: arg === "on" };
         writeConfig(cfg.configPath, { ...current, usage: nextUsage });
         refresh(ctx);
         if (arg === "on") startUsageRefresh(ctx);
@@ -599,8 +325,9 @@ export default function betterOpenAI(pi: ExtensionAPI): void {
           return;
         }
         const cfg = refresh(ctx);
-        const current = readConfig(cfg.configPath) ?? {};
-        writeConfig(cfg.configPath, { ...current, footer: { ...(current.footer ?? {}), mode } });
+        const current = readRawConfig(cfg.configPath);
+        const currentFooter = isRecord(current.footer) ? current.footer : {};
+        writeConfig(cfg.configPath, { ...current, footer: { ...currentFooter, mode } });
         refresh(ctx);
         updateFooter(ctx);
         ctx.ui.notify(`Footer mode set to ${mode}.`, "info");
@@ -612,26 +339,27 @@ export default function betterOpenAI(pi: ExtensionAPI): void {
   registerFooterCommand(OPENAI_FOOTER_COMMAND);
 
   function installFooter(ctx: ExtensionContext): void {
+    if (footerInstalled) {
+      requestFooterRender?.();
+      return;
+    }
+    footerInstalled = true;
     ctx.ui.setFooter((tui, theme, footerData) => {
+      requestFooterRender = () => tui.requestRender();
       const unsubscribe = footerData.onBranchChange?.(() => tui.requestRender());
       return {
-        dispose: unsubscribe,
+        dispose: () => {
+          unsubscribe?.();
+          footerInstalled = false;
+          requestFooterRender = undefined;
+        },
         invalidate() {},
         render(width: number): string[] {
-          let totalInput = 0;
-          let totalOutput = 0;
-          let totalCacheRead = 0;
-          let totalCacheWrite = 0;
-          let totalCost = 0;
-
-          for (const entry of ctx.sessionManager.getEntries()) {
-            if (entry.type !== "message" || entry.message.role !== "assistant") continue;
-            totalInput += entry.message.usage.input;
-            totalOutput += entry.message.usage.output;
-            totalCacheRead += entry.message.usage.cacheRead;
-            totalCacheWrite += entry.message.usage.cacheWrite;
-            totalCost += entry.message.usage.cost.total;
-          }
+          const totalInput = footerTotals.input;
+          const totalOutput = footerTotals.output;
+          const totalCacheRead = footerTotals.cacheRead;
+          const totalCacheWrite = footerTotals.cacheWrite;
+          const totalCost = footerTotals.cost;
 
           let pwd = ctx.sessionManager.getCwd();
           const home = process.env.HOME || process.env.USERPROFILE;
@@ -741,6 +469,8 @@ export default function betterOpenAI(pi: ExtensionAPI): void {
       installFooter(ctx);
       return;
     }
+    footerInstalled = false;
+    requestFooterRender = undefined;
     ctx.ui.setFooter(undefined);
     if (cfg.footer.mode === "off") {
       ctx.ui.setStatus(STATUS_KEY, undefined);
@@ -753,36 +483,32 @@ export default function betterOpenAI(pi: ExtensionAPI): void {
 
   pi.on("session_start", (_event, ctx) => {
     const nextConfig = refresh(ctx);
-    active = nextConfig.persistState ? nextConfig.active : false;
-    if (pi.getFlag(FLAG) === true) {
-      if (supportsFast(ctx, nextConfig.supportedModels)) {
-        active = true;
-        persist(nextConfig);
-      } else {
-        active = false;
-        ctx.ui.notify(`Fast mode cannot be enabled for ${currentModelKey(ctx)}. Supported models: ${modelList(nextConfig.supportedModels)}.`, "warning");
-      }
+    desiredActive = nextConfig.persistState ? nextConfig.desiredActive : false;
+    if (pi.getFlag(FLAG) === true) desiredActive = true;
+    applyDesiredFastState(ctx, nextConfig);
+    if (desiredActive !== nextConfig.desiredActive || active !== nextConfig.active) persist(nextConfig);
+    if (desiredActive && !active) {
+      ctx.ui.notify(`Fast mode requested, but ${currentModelKey(ctx)} is unsupported. It will activate automatically when you switch to a supported model: ${modelList(nextConfig.supportedModels)}.`, "warning");
     }
-    if (active && !supportsFast(ctx, nextConfig.supportedModels)) {
-      active = false;
-      persist(nextConfig);
-      ctx.ui.notify(`Fast mode disabled because ${currentModelKey(ctx)} is not supported.`, "warning");
-    }
+    refreshFooterTotals(ctx);
     updateFooter(ctx);
     startUsageRefresh(ctx);
     if (active) ctx.ui.notify(stateText(ctx, active, nextConfig.supportedModels), "info");
   });
 
   pi.on("turn_end", (_event, ctx) => {
+    refreshFooterTotals(ctx);
+    updateFooter(ctx);
     void refreshUsage(ctx);
   });
 
   pi.on("model_select", (event, ctx) => {
     const cfg = config(ctx);
-    if (active && !supportsFast(ctx, cfg.supportedModels)) {
-      active = false;
+    const wasActive = active;
+    applyDesiredFastState(ctx, cfg);
+    if (active !== wasActive) {
       persist(cfg);
-      ctx.ui.notify(`Fast mode disabled because ${currentModelKey(ctx)} is not supported.`, "warning");
+      ctx.ui.notify(active ? stateText(ctx, active, cfg.supportedModels) : `Fast mode inactive for unsupported model ${currentModelKey(ctx)}.`, active ? "info" : "warning");
     }
     updateFooter(ctx);
     void refreshUsage(ctx, event.model.id);
@@ -813,8 +539,10 @@ export const _test = {
   normalizeModelKeys,
   parseModels,
   resolveConfig,
+  readRawConfig,
   supportsFast,
   parseUsageSnapshot,
   formatPercent,
+  formatUsageSnapshot,
   readCodexAuth
 };

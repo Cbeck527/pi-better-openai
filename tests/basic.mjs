@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import { _test } from "../extensions/index.ts";
+import { truncateToWidth } from "../extensions/format.ts";
 
 assert.equal(_test.CONFIG_BASENAME, "pi-better-openai.json");
+assert.equal(_test.DEFAULT_CONFIG.desiredActive, false);
 assert.equal(_test.SERVICE_TIER, "priority");
 assert.deepEqual(_test.DEFAULT_SUPPORTED_MODELS, [
   "openai/gpt-5.4",
@@ -12,7 +14,8 @@ assert.deepEqual(_test.DEFAULT_SUPPORTED_MODELS, [
 
 assert.deepEqual(_test.parseModelKey("openai/gpt-5.5"), { provider: "openai", id: "gpt-5.5" });
 assert.equal(_test.parseModelKey("bad"), undefined);
-assert.equal(_test.formatPercent(99.4), "99% left");
+assert.deepEqual(_test.normalizeModelKeys(["openai/gpt-5.5", "bad", 42]), ["openai/gpt-5.5"]);
+assert.equal(_test.formatPercent(99.4), "99%");
 assert.equal(_test.formatPercent(null), "--");
 
 const usage = _test.parseUsageSnapshot(
@@ -28,5 +31,7 @@ const usage = _test.parseUsageSnapshot(
 assert.equal(usage.fiveHourLeftPercent, 99);
 assert.equal(usage.sevenDayLeftPercent, 51);
 assert.equal(usage.isLimited, false);
+assert.match(_test.formatUsageSnapshot(usage, { showResetTimes: false }), /^Usage: 5h: 99% \| 7d: 51%$/);
+assert.equal(truncateToWidth("\u001b[2mabcdef\u001b[22m", 4), "\u001b[2ma...\u001b[22m");
 
 console.log("tests passed");
