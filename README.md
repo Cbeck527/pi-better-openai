@@ -1,6 +1,6 @@
-# pi-gpt-fast
+# pi-better-openai
 
-A pi extension that toggles OpenAI GPT fast mode by adding `service_tier: "priority"` to provider requests for configured models.
+A personal pi extension that improves OpenAI in pi with fast mode, usage stats, and footer polish. Fast mode adds `service_tier: "priority"` to provider requests for configured models.
 
 It also customizes the footer to show `gpt-5.5 fast • low` and, when `openai-codex` OAuth credentials are available, Codex usage windows from ChatGPT's usage endpoint.
 
@@ -44,8 +44,8 @@ Footer modes:
 
 The extension uses project-over-global config:
 
-- Project: `<repo>/.pi/extensions/pi-gpt-fast.json`
-- Global: `~/.pi/agent/extensions/pi-gpt-fast.json`
+- Project: `<repo>/.pi/extensions/pi-better-openai.json`
+- Global: `~/.pi/agent/extensions/pi-better-openai.json`
 
 If no config exists, the extension writes a default global config.
 

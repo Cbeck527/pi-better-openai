@@ -1,5 +1,5 @@
 /**
- * GPT fast mode for pi.
+ * Better OpenAI for pi.
  *
  * Adds `service_tier: "priority"` to OpenAI provider payloads while fast mode is
  * enabled and the selected model is in the configured allow-list.
@@ -13,7 +13,7 @@ const COMMAND = "fast";
 const USAGE_COMMAND = "usage";
 const FOOTER_COMMAND = "fast-footer";
 const FLAG = "fast";
-const CONFIG_BASENAME = "pi-gpt-fast.json";
+const CONFIG_BASENAME = "pi-better-openai.json";
 const SERVICE_TIER = "priority";
 const COMMAND_ARGS = ["on", "off", "status", "models"] as const;
 const USAGE_COMMAND_ARGS = ["status", "refresh", "on", "off"] as const;
@@ -171,7 +171,7 @@ function readConfig(path: string): ConfigFile | undefined {
     return config;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    console.warn(`[pi-gpt-fast] Failed to read ${path}: ${message}`);
+    console.warn(`[pi-better-openai] Failed to read ${path}: ${message}`);
     return undefined;
   }
 }
@@ -182,7 +182,7 @@ function writeConfig(path: string, config: ConfigFile): void {
     writeFileSync(path, `${JSON.stringify(config, null, 2)}\n`, "utf8");
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    console.warn(`[pi-gpt-fast] Failed to write ${path}: ${message}`);
+    console.warn(`[pi-better-openai] Failed to write ${path}: ${message}`);
   }
 }
 
@@ -407,7 +407,7 @@ function isOpenAISubscriptionModel(ctx: ExtensionContext, cfg: ResolvedConfig): 
   return !cfg.usage.showOnlyOnSubscriptionModels || ctx.modelRegistry.isUsingOAuth(ctx.model);
 }
 
-export default function gptFast(pi: ExtensionAPI): void {
+export default function betterOpenAI(pi: ExtensionAPI): void {
   let active = false;
   let cachedConfig: ResolvedConfig | undefined;
   let usageSnapshot: UsageSnapshot | undefined;
@@ -482,13 +482,13 @@ export default function gptFast(pi: ExtensionAPI): void {
   }
 
   pi.registerFlag(FLAG, {
-    description: "Start with GPT fast mode enabled (OpenAI service_tier=priority)",
+    description: "Start with OpenAI fast mode enabled (service_tier=priority)",
     type: "boolean",
     default: false
   });
 
   pi.registerCommand(COMMAND, {
-    description: "Toggle GPT fast mode for OpenAI models",
+    description: "Toggle OpenAI fast mode",
     getArgumentCompletions: (prefix) => {
       const items = COMMAND_ARGS.filter((arg) => arg.startsWith(prefix)).map((arg) => ({ value: arg, label: arg }));
       return items.length ? items : null;
@@ -689,18 +689,18 @@ export default function gptFast(pi: ExtensionAPI): void {
   function updateFooter(ctx: ExtensionContext): void {
     const cfg = config(ctx);
     if (cfg.footer.mode === "replace") {
-      ctx.ui.setStatus("openai-fast-meter", undefined);
+      ctx.ui.setStatus("better-openai", undefined);
       installFooter(ctx);
       return;
     }
     ctx.ui.setFooter(undefined);
     if (cfg.footer.mode === "off") {
-      ctx.ui.setStatus("openai-fast-meter", undefined);
+      ctx.ui.setStatus("better-openai", undefined);
       return;
     }
     const fast = active && supportsFast(ctx, cfg.supportedModels) ? `${ctx.model?.id ?? "model"} fast` : undefined;
     const usage = usageSnapshot && cfg.usage.enabled && isOpenAISubscriptionModel(ctx, cfg) ? formatUsageSnapshot(usageSnapshot, cfg.usage) : undefined;
-    ctx.ui.setStatus("openai-fast-meter", [fast, usage].filter(Boolean).join(" | ") || undefined);
+    ctx.ui.setStatus("better-openai", [fast, usage].filter(Boolean).join(" | ") || undefined);
   }
 
   pi.on("session_start", (_event, ctx) => {

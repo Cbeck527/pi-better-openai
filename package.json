@@ -1,7 +1,7 @@
 {
-  "name": "pi-gpt-fast",
+  "name": "pi-better-openai",
   "version": "0.1.0",
-  "description": "Pi extension that enables OpenAI priority fast mode for configured GPT models.",
+  "description": "Personal pi extension that improves OpenAI with fast mode, usage stats, and footer polish.",
   "type": "module",
   "keywords": [
     "pi",
