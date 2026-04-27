@@ -80,9 +80,7 @@ export function isRecord(value: unknown): value is Record<string, unknown> {
 export function configPaths(cwd: string, home = homedir()) {
   return {
     project: join(cwd, ".pi", "extensions", CONFIG_BASENAME),
-    global: join(home, ".pi", "agent", "extensions", CONFIG_BASENAME),
-    legacyProject: join(cwd, ".pi", "extensions", "pi-gpt-fast.json"),
-    legacyGlobal: join(home, ".pi", "agent", "extensions", "pi-gpt-fast.json")
+    global: join(home, ".pi", "agent", "extensions", CONFIG_BASENAME)
   };
 }
 
@@ -155,19 +153,14 @@ export function writeConfig(path: string, config: ConfigFile | Record<string, un
   }
 }
 
-function ensureConfigFile(projectConfigPath: string, globalConfigPath: string, legacyProjectPath: string, legacyGlobalPath: string): void {
+function ensureConfigFile(projectConfigPath: string, globalConfigPath: string): void {
   if (existsSync(projectConfigPath) || existsSync(globalConfigPath)) return;
-  const legacyPath = existsSync(legacyProjectPath) ? legacyProjectPath : existsSync(legacyGlobalPath) ? legacyGlobalPath : undefined;
-  if (legacyPath) {
-    writeConfig(globalConfigPath, { ...readRawConfig(legacyPath), migratedFrom: legacyPath });
-    return;
-  }
   writeConfig(globalConfigPath, DEFAULT_CONFIG);
 }
 
 export function resolveConfig(cwd: string): ResolvedConfig {
   const paths = configPaths(cwd);
-  ensureConfigFile(paths.project, paths.global, paths.legacyProject, paths.legacyGlobal);
+  ensureConfigFile(paths.project, paths.global);
 
   const projectConfigExists = existsSync(paths.project);
   const globalConfigExists = existsSync(paths.global);

@@ -43,7 +43,7 @@ const OPENAI_CONFIG_COMMAND = "openai-config";
 const FLAG = "fast";
 const SERVICE_TIER = "priority";
 const COMMAND_ARGS = ["on", "off", "status", "models", "debug"] as const;
-const USAGE_COMMAND_ARGS = ["status", "refresh", "on", "off"] as const;
+const USAGE_COMMAND_ARGS = ["status", "refresh", "on", "off", "debug"] as const;
 
 function currentModelKey(ctx: ExtensionContext): string {
   return ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : "none";
@@ -60,9 +60,13 @@ function modelList(supportedModels: SupportedModel[]): string {
     : "none configured";
 }
 
-function stateText(ctx: ExtensionContext, active: boolean, _supportedModels: SupportedModel[]): string {
+function stateText(ctx: ExtensionContext, desiredActive: boolean, active: boolean, supportedModels: SupportedModel[]): string {
   const model = currentModelKey(ctx);
-  return active ? `Fast mode is on for ${model}.` : `Fast mode is off. Current model: ${model}.`;
+  if (active) return `Fast mode is on for ${model}.`;
+  if (desiredActive) {
+    return `Fast mode is requested, but inactive for unsupported model ${model}. Supported models: ${modelList(supportedModels)}.`;
+  }
+  return `Fast mode is off. Current model: ${model}.`;
 }
 
 function isOpenAISubscriptionModel(ctx: ExtensionContext, cfg: ResolvedConfig): boolean {
@@ -77,10 +81,13 @@ export default function betterOpenAI(pi: ExtensionAPI): void {
   let usageSnapshot: UsageSnapshot | undefined;
   let usageUpdatedAt: number | undefined;
   let usageError: string | undefined;
+  let usageLastFetchAt: number | undefined;
   let usageTimer: ReturnType<typeof setInterval> | undefined;
   let footerTotals = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0 };
   let usageRefreshInFlight = false;
   let queuedUsageRefresh: { ctx: ExtensionContext; modelId?: string; notify?: boolean } | undefined;
+  let shuttingDown = false;
+  let usageAbortController: AbortController | undefined;
   let footerInstalled = false;
   let requestFooterRender: (() => void) | undefined;
   let lastInjectedAt: number | undefined;
@@ -116,11 +123,11 @@ export default function betterOpenAI(pi: ExtensionAPI): void {
       ctx.ui.notify(`Fast mode requested, but ${currentModelKey(ctx)} is unsupported. It will activate automatically when you switch to a supported model: ${modelList(nextConfig.supportedModels)}.`, "warning");
       return;
     }
-    ctx.ui.notify(stateText(ctx, active, nextConfig.supportedModels), "info");
+    ctx.ui.notify(stateText(ctx, desiredActive, active, nextConfig.supportedModels), "info");
   }
 
   async function refreshUsage(ctx: ExtensionContext, modelId = ctx.model?.id, options?: { notify?: boolean }): Promise<void> {
-    if (!ctx.hasUI) return;
+    if (shuttingDown || !ctx.hasUI) return;
     if (usageRefreshInFlight) {
       queuedUsageRefresh = { ctx, modelId, notify: queuedUsageRefresh?.notify || options?.notify };
       return;
@@ -131,24 +138,34 @@ export default function betterOpenAI(pi: ExtensionAPI): void {
       if (!cfg.usage.enabled) {
         usageSnapshot = undefined;
         usageError = "Usage display is disabled.";
-        updateFooter(ctx);
+        if (!shuttingDown) updateFooter(ctx);
         return;
       }
+      if (!isOpenAISubscriptionModel(ctx, cfg)) {
+        if (!shuttingDown) updateFooter(ctx);
+        return;
+      }
+      usageAbortController = new AbortController();
       const timeoutSignal = AbortSignal.timeout(10_000);
-      const signal = ctx.signal ? AbortSignal.any([ctx.signal, timeoutSignal]) : timeoutSignal;
+      const signal = ctx.signal
+        ? AbortSignal.any([ctx.signal, timeoutSignal, usageAbortController.signal])
+        : AbortSignal.any([timeoutSignal, usageAbortController.signal]);
       const data = await requestCodexUsage(signal);
+      usageLastFetchAt = Date.now();
       usageSnapshot = data ? parseUsageSnapshot(data, modelId) : undefined;
       usageUpdatedAt = usageSnapshot ? Date.now() : undefined;
       usageError = data ? undefined : `Missing openai-codex OAuth credentials in ${AUTH_FILE}.`;
-      updateFooter(ctx);
-      if (options?.notify) ctx.ui.notify(formatUsageStatus(ctx), usageSnapshot ? "info" : "warning");
+      if (!shuttingDown) updateFooter(ctx);
+      if (!shuttingDown && options?.notify) ctx.ui.notify(formatUsageStatus(ctx), usageSnapshot ? "info" : "warning");
     } catch (error) {
+      if (shuttingDown) return;
       usageError = error instanceof Error ? error.message : String(error);
       updateFooter(ctx);
       if (options?.notify) ctx.ui.notify(formatUsageStatus(ctx), "warning");
     } finally {
+      usageAbortController = undefined;
       usageRefreshInFlight = false;
-      if (queuedUsageRefresh) {
+      if (!shuttingDown && queuedUsageRefresh) {
         const next = queuedUsageRefresh;
         queuedUsageRefresh = undefined;
         void refreshUsage(next.ctx, next.modelId, { notify: next.notify });
@@ -175,6 +192,24 @@ export default function betterOpenAI(pi: ExtensionAPI): void {
       footerTotals.cacheWrite += entry.message.usage.cacheWrite;
       footerTotals.cost += entry.message.usage.cost.total;
     }
+  }
+
+  function formatUsageDebug(ctx: ExtensionContext): string {
+    const cfg = config(ctx);
+    const auth = readCodexAuth();
+    return [
+      `Usage enabled: ${cfg.usage.enabled}`,
+      `Current model: ${currentModelKey(ctx)}`,
+      `Current model eligible: ${isOpenAISubscriptionModel(ctx, cfg)}`,
+      `Requires subscription model: ${cfg.usage.showOnlyOnSubscriptionModels}`,
+      `Auth: ${auth ? "found" : "missing"}`,
+      `Account ID: ${auth?.accountId ?? "none"}`,
+      `Last fetch: ${usageLastFetchAt ? new Date(usageLastFetchAt).toLocaleTimeString() : "never"}`,
+      `Last successful update: ${usageUpdatedAt ? new Date(usageUpdatedAt).toLocaleTimeString() : "never"}`,
+      `Last error: ${usageError ?? "none"}`,
+      `Refresh interval: ${cfg.usage.refreshIntervalMs}ms`,
+      `Endpoint: https://chatgpt.com/backend-api/wham/usage`
+    ].join("\n");
   }
 
   function formatUsageStatus(ctx: ExtensionContext): string {
@@ -212,7 +247,7 @@ export default function betterOpenAI(pi: ExtensionAPI): void {
   function formatOpenAIStatus(ctx: ExtensionContext): string {
     const cfg = refresh(ctx);
     return [
-      stateText(ctx, active, cfg.supportedModels),
+      stateText(ctx, desiredActive, active, cfg.supportedModels),
       formatUsageStatus(ctx),
       `Footer mode: ${cfg.footer.mode}`,
       `Config: ${cfg.configPath}`
@@ -289,6 +324,7 @@ export default function betterOpenAI(pi: ExtensionAPI): void {
       const arg = args.trim().toLowerCase() || "status";
       const cfg = refresh(ctx);
       if (arg === "status") return ctx.ui.notify(formatUsageStatus(ctx), usageSnapshot ? "info" : "warning");
+      if (arg === "debug") return ctx.ui.notify(formatUsageDebug(ctx), "info");
       if (arg === "refresh") return refreshUsage(ctx, ctx.model?.id, { notify: true });
       if (arg === "on" || arg === "off") {
         const current = readRawConfig(cfg.configPath);
@@ -307,7 +343,7 @@ export default function betterOpenAI(pi: ExtensionAPI): void {
         ctx.ui.notify(`Usage display ${arg === "on" ? "enabled" : "disabled"}.`, "info");
         return;
       }
-      ctx.ui.notify("Usage: /usage [status|refresh|on|off]", "error");
+      ctx.ui.notify("Usage: /usage [status|refresh|on|off|debug]", "error");
     }
   });
 
@@ -493,7 +529,7 @@ export default function betterOpenAI(pi: ExtensionAPI): void {
     refreshFooterTotals(ctx);
     updateFooter(ctx);
     startUsageRefresh(ctx);
-    if (active) ctx.ui.notify(stateText(ctx, active, nextConfig.supportedModels), "info");
+    if (active) ctx.ui.notify(stateText(ctx, desiredActive, active, nextConfig.supportedModels), "info");
   });
 
   pi.on("turn_end", (_event, ctx) => {
@@ -502,19 +538,33 @@ export default function betterOpenAI(pi: ExtensionAPI): void {
     void refreshUsage(ctx);
   });
 
+  pi.on("session_compact", (_event, ctx) => {
+    refreshFooterTotals(ctx);
+    updateFooter(ctx);
+  });
+
+  pi.on("session_tree", (_event, ctx) => {
+    refreshFooterTotals(ctx);
+    updateFooter(ctx);
+  });
+
   pi.on("model_select", (event, ctx) => {
     const cfg = config(ctx);
     const wasActive = active;
     applyDesiredFastState(ctx, cfg);
     if (active !== wasActive) {
       persist(cfg);
-      ctx.ui.notify(active ? stateText(ctx, active, cfg.supportedModels) : `Fast mode inactive for unsupported model ${currentModelKey(ctx)}.`, active ? "info" : "warning");
+      ctx.ui.notify(active ? stateText(ctx, desiredActive, active, cfg.supportedModels) : `Fast mode inactive for unsupported model ${currentModelKey(ctx)}.`, active ? "info" : "warning");
     }
     updateFooter(ctx);
     void refreshUsage(ctx, event.model.id);
   });
 
   pi.on("session_shutdown", () => {
+    shuttingDown = true;
+    queuedUsageRefresh = undefined;
+    usageAbortController?.abort();
+    usageAbortController = undefined;
     if (usageTimer) clearInterval(usageTimer);
     usageTimer = undefined;
   });

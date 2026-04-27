@@ -44,6 +44,7 @@ Commands:
 - `/fast models` lists configured models.
 - `/usage` or `/usage status` shows current OpenAI subscription usage.
 - `/usage refresh` refetches usage immediately.
+- `/usage debug` shows usage endpoint/auth/fetch diagnostics without printing tokens.
 - `/usage on` / `/usage off` toggles usage display.
 - `/openai-status` shows fast mode, usage, footer mode, and config path.
 - `/openai-config`, `/openai-config path`, and `/openai-config print` show config locations or contents.
@@ -111,11 +112,11 @@ npm test
 The extension is split into a few small modules plus the main extension entry point:
 
 - `extensions/identity.ts` owns package identity, config filename, and status key constants.
-- `extensions/config.ts` owns config types, defaults, migration, parsing, resolving, and raw-preserving writes.
+- `extensions/config.ts` owns config types, defaults, parsing, resolving, and raw-preserving writes.
 - `extensions/usage.ts` owns Codex auth reading, usage endpoint fetching, usage parsing, and usage formatting.
 - `extensions/format.ts` owns footer text formatting helpers.
-- `extensions/index.ts` wires commands, fast-mode state, usage refresh, provider-request injection, events, and footer rendering.
+- `extensions/pi-better-openai.ts` wires commands, fast-mode state, usage refresh, provider-request injection, events, and footer rendering.
 
 ## Package layout
 
-This repository is shaped as a pi package. Pi discovers `extensions/index.ts` via the `pi.extensions` manifest in `package.json`.
+This repository is shaped as a pi package. Pi discovers `extensions/pi-better-openai.ts` via the `pi.extensions` manifest in `package.json`.
