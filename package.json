@@ -13,6 +13,9 @@
     "priority",
     "service-tier"
   ],
+  "scripts": {
+    "test": "node tests/basic.mjs"
+  },
   "files": [
     "extensions/",
     "README.md",

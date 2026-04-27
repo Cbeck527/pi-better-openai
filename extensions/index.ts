@@ -8,14 +8,16 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
+import { CONFIG_BASENAME, logPrefix, STATUS_KEY } from "./identity.ts";
 
 const COMMAND = "fast";
 const USAGE_COMMAND = "usage";
 const FOOTER_COMMAND = "fast-footer";
+const OPENAI_FOOTER_COMMAND = "openai-footer";
+const OPENAI_STATUS_COMMAND = "openai-status";
 const FLAG = "fast";
-const CONFIG_BASENAME = "pi-better-openai.json";
 const SERVICE_TIER = "priority";
-const COMMAND_ARGS = ["on", "off", "status", "models"] as const;
+const COMMAND_ARGS = ["on", "off", "status", "models", "debug"] as const;
 const USAGE_COMMAND_ARGS = ["status", "refresh", "on", "off"] as const;
 const FOOTER_MODES = ["replace", "status", "off"] as const;
 
@@ -171,7 +173,7 @@ function readConfig(path: string): ConfigFile | undefined {
     return config;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    console.warn(`[pi-better-openai] Failed to read ${path}: ${message}`);
+    console.warn(`${logPrefix()} Failed to read ${path}: ${message}`);
     return undefined;
   }
 }
@@ -182,7 +184,7 @@ function writeConfig(path: string, config: ConfigFile): void {
     writeFileSync(path, `${JSON.stringify(config, null, 2)}\n`, "utf8");
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    console.warn(`[pi-better-openai] Failed to write ${path}: ${message}`);
+    console.warn(`${logPrefix()} Failed to write ${path}: ${message}`);
   }
 }
 
@@ -414,6 +416,9 @@ export default function betterOpenAI(pi: ExtensionAPI): void {
   let usageUpdatedAt: number | undefined;
   let usageError: string | undefined;
   let usageTimer: ReturnType<typeof setInterval> | undefined;
+  let lastInjectedAt: number | undefined;
+  let lastInjectedModel: string | undefined;
+  let lastInjectedTier: string | undefined;
 
   function refresh(ctx: ExtensionContext): ResolvedConfig {
     cachedConfig = resolveConfig(ctx.cwd || process.cwd());
@@ -432,6 +437,10 @@ export default function betterOpenAI(pi: ExtensionAPI): void {
 
   function setActive(ctx: ExtensionContext, next: boolean): void {
     const nextConfig = refresh(ctx);
+    if (next && !supportsFast(ctx, nextConfig.supportedModels)) {
+      ctx.ui.notify(`Fast mode cannot be enabled for ${currentModelKey(ctx)}. Supported models: ${modelList(nextConfig.supportedModels)}.`, "warning");
+      return;
+    }
     active = next;
     persist(nextConfig);
     updateFooter(ctx);
@@ -487,6 +496,30 @@ export default function betterOpenAI(pi: ExtensionAPI): void {
     default: false
   });
 
+  function formatDebugStatus(ctx: ExtensionContext): string {
+    const cfg = config(ctx);
+    return [
+      `Fast active: ${active}`,
+      `Current model: ${currentModelKey(ctx)}`,
+      `Supported model: ${supportsFast(ctx, cfg.supportedModels)}`,
+      `Configured service_tier: ${SERVICE_TIER}`,
+      `Last injected: ${lastInjectedAt ? `${new Date(lastInjectedAt).toLocaleTimeString()} (${lastInjectedModel}, ${lastInjectedTier})` : "never"}`,
+      `Footer mode: ${cfg.footer.mode}`,
+      `Usage enabled: ${cfg.usage.enabled}`,
+      `Config: ${cfg.configPath}`
+    ].join("\n");
+  }
+
+  function formatOpenAIStatus(ctx: ExtensionContext): string {
+    const cfg = refresh(ctx);
+    return [
+      stateText(ctx, active, cfg.supportedModels),
+      formatUsageStatus(ctx),
+      `Footer mode: ${cfg.footer.mode}`,
+      `Config: ${cfg.configPath}`
+    ].join("\n");
+  }
+
   pi.registerCommand(COMMAND, {
     description: "Toggle OpenAI fast mode",
     getArgumentCompletions: (prefix) => {
@@ -499,15 +532,25 @@ export default function betterOpenAI(pi: ExtensionAPI): void {
       if (arg === "on") return setActive(ctx, true);
       if (arg === "off") return setActive(ctx, false);
       if (arg === "status") {
-        const nextConfig = refresh(ctx);
-        ctx.ui.notify(`${stateText(ctx, active, nextConfig.supportedModels)}\n${formatUsageStatus(ctx)}`, "info");
+        ctx.ui.notify(formatOpenAIStatus(ctx), "info");
+        return;
+      }
+      if (arg === "debug") {
+        ctx.ui.notify(formatDebugStatus(ctx), "info");
         return;
       }
       if (arg === "models") {
         ctx.ui.notify(`Fast-mode supported models: ${modelList(refresh(ctx).supportedModels)}.`, "info");
         return;
       }
-      ctx.ui.notify("Usage: /fast [on|off|status|models]", "error");
+      ctx.ui.notify("Usage: /fast [on|off|status|models|debug]", "error");
+    }
+  });
+
+  pi.registerCommand(OPENAI_STATUS_COMMAND, {
+    description: "Show Better OpenAI fast, usage, footer, and config status",
+    handler: async (_args, ctx) => {
+      ctx.ui.notify(formatOpenAIStatus(ctx), "info");
     }
   });
 
@@ -542,26 +585,31 @@ export default function betterOpenAI(pi: ExtensionAPI): void {
     }
   });
 
-  pi.registerCommand(FOOTER_COMMAND, {
-    description: "Set footer mode: replace | status | off",
-    getArgumentCompletions: (prefix) => {
-      const items = FOOTER_MODES.filter((mode) => mode.startsWith(prefix)).map((mode) => ({ value: mode, label: mode }));
-      return items.length ? items : null;
-    },
-    handler: async (args, ctx) => {
-      const mode = args.trim().toLowerCase() as FooterMode;
-      if (!(FOOTER_MODES as readonly string[]).includes(mode)) {
-        ctx.ui.notify(`Footer mode is ${config(ctx).footer.mode}. Usage: /fast-footer [replace|status|off]`, "info");
-        return;
+  function registerFooterCommand(name: string): void {
+    pi.registerCommand(name, {
+      description: "Set footer mode: replace | status | off",
+      getArgumentCompletions: (prefix) => {
+        const items = FOOTER_MODES.filter((mode) => mode.startsWith(prefix)).map((mode) => ({ value: mode, label: mode }));
+        return items.length ? items : null;
+      },
+      handler: async (args, ctx) => {
+        const mode = args.trim().toLowerCase() as FooterMode;
+        if (!(FOOTER_MODES as readonly string[]).includes(mode)) {
+          ctx.ui.notify(`Footer mode is ${config(ctx).footer.mode}. Usage: /${name} [replace|status|off]`, "info");
+          return;
+        }
+        const cfg = refresh(ctx);
+        const current = readConfig(cfg.configPath) ?? {};
+        writeConfig(cfg.configPath, { ...current, footer: { ...(current.footer ?? {}), mode } });
+        refresh(ctx);
+        updateFooter(ctx);
+        ctx.ui.notify(`Footer mode set to ${mode}.`, "info");
       }
-      const cfg = refresh(ctx);
-      const current = readConfig(cfg.configPath) ?? {};
-      writeConfig(cfg.configPath, { ...current, footer: { ...(current.footer ?? {}), mode } });
-      refresh(ctx);
-      updateFooter(ctx);
-      ctx.ui.notify(`Footer mode set to ${mode}.`, "info");
-    }
-  });
+    });
+  }
+
+  registerFooterCommand(FOOTER_COMMAND);
+  registerFooterCommand(OPENAI_FOOTER_COMMAND);
 
   function installFooter(ctx: ExtensionContext): void {
     ctx.ui.setFooter((tui, theme, footerData) => {
@@ -689,26 +737,36 @@ export default function betterOpenAI(pi: ExtensionAPI): void {
   function updateFooter(ctx: ExtensionContext): void {
     const cfg = config(ctx);
     if (cfg.footer.mode === "replace") {
-      ctx.ui.setStatus("better-openai", undefined);
+      ctx.ui.setStatus(STATUS_KEY, undefined);
       installFooter(ctx);
       return;
     }
     ctx.ui.setFooter(undefined);
     if (cfg.footer.mode === "off") {
-      ctx.ui.setStatus("better-openai", undefined);
+      ctx.ui.setStatus(STATUS_KEY, undefined);
       return;
     }
     const fast = active && supportsFast(ctx, cfg.supportedModels) ? `${ctx.model?.id ?? "model"} fast` : undefined;
     const usage = usageSnapshot && cfg.usage.enabled && isOpenAISubscriptionModel(ctx, cfg) ? formatUsageSnapshot(usageSnapshot, cfg.usage) : undefined;
-    ctx.ui.setStatus("better-openai", [fast, usage].filter(Boolean).join(" | ") || undefined);
+    ctx.ui.setStatus(STATUS_KEY, [fast, usage].filter(Boolean).join(" | ") || undefined);
   }
 
   pi.on("session_start", (_event, ctx) => {
     const nextConfig = refresh(ctx);
     active = nextConfig.persistState ? nextConfig.active : false;
     if (pi.getFlag(FLAG) === true) {
-      active = true;
+      if (supportsFast(ctx, nextConfig.supportedModels)) {
+        active = true;
+        persist(nextConfig);
+      } else {
+        active = false;
+        ctx.ui.notify(`Fast mode cannot be enabled for ${currentModelKey(ctx)}. Supported models: ${modelList(nextConfig.supportedModels)}.`, "warning");
+      }
+    }
+    if (active && !supportsFast(ctx, nextConfig.supportedModels)) {
+      active = false;
       persist(nextConfig);
+      ctx.ui.notify(`Fast mode disabled because ${currentModelKey(ctx)} is not supported.`, "warning");
     }
     updateFooter(ctx);
     startUsageRefresh(ctx);
@@ -720,6 +778,12 @@ export default function betterOpenAI(pi: ExtensionAPI): void {
   });
 
   pi.on("model_select", (event, ctx) => {
+    const cfg = config(ctx);
+    if (active && !supportsFast(ctx, cfg.supportedModels)) {
+      active = false;
+      persist(cfg);
+      ctx.ui.notify(`Fast mode disabled because ${currentModelKey(ctx)} is not supported.`, "warning");
+    }
     updateFooter(ctx);
     void refreshUsage(ctx, event.model.id);
   });
@@ -732,6 +796,9 @@ export default function betterOpenAI(pi: ExtensionAPI): void {
   pi.on("before_provider_request", (event, ctx) => {
     const nextConfig = config(ctx);
     if (!active || !supportsFast(ctx, nextConfig.supportedModels) || !isRecord(event.payload)) return;
+    lastInjectedAt = Date.now();
+    lastInjectedModel = currentModelKey(ctx);
+    lastInjectedTier = SERVICE_TIER;
     return { ...event.payload, service_tier: SERVICE_TIER };
   });
 }

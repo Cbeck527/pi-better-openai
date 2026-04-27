@@ -6,19 +6,39 @@ It also customizes the footer to show `gpt-5.5 fast • low` and, when `openai-c
 
 It does **not** change the selected model, thinking level, tools, or prompts.
 
-## Usage
+## Install
 
-Load locally while developing:
+Install from this Git repository:
 
 ```bash
-pi -e ./extensions/index.ts
+pi install git:<your-git-host>/<your-user>/pi-better-openai
+```
+
+Or install from a local checkout:
+
+```bash
+pi install /path/to/pi-better-openai
+```
+
+For a project-local install instead of a global install, add `-l`:
+
+```bash
+pi install -l /path/to/pi-better-openai
+```
+
+Reload pi after installing:
+
+```text
+/reload
 ```
 
 Start with fast mode enabled:
 
 ```bash
-pi -e ./extensions/index.ts --fast
+pi --fast
 ```
+
+## Usage
 
 Commands:
 
@@ -26,11 +46,16 @@ Commands:
 - `/fast on` enables fast mode.
 - `/fast off` disables fast mode.
 - `/fast status` shows fast mode plus usage status.
+- `/fast debug` shows injected service tier, last injection time, config path, and footer/usage settings.
 - `/fast models` lists configured models.
 - `/usage` or `/usage status` shows current OpenAI subscription usage.
 - `/usage refresh` refetches usage immediately.
 - `/usage on` / `/usage off` toggles usage display.
-- `/fast-footer replace|status|off` controls how the extension renders footer UI.
+- `/openai-status` shows fast mode, usage, footer mode, and config path.
+- `/openai-footer replace|status|off` controls how the extension renders footer UI.
+- `/fast-footer replace|status|off` is kept as an alias.
+
+Fast mode can only be enabled while the current model is one of the configured supported models. If you try `/fast on` with an unsupported model, the extension warns and leaves fast mode off.
 
 The footer usage display is fetched from `https://chatgpt.com/backend-api/wham/usage` using the `openai-codex` OAuth entry in `~/.pi/agent/auth.json` (or `$PI_CODING_AGENT_DIR/auth.json`). It refreshes on startup, after turns, on model changes, and every configured interval.
 
@@ -80,6 +105,17 @@ If no config exists, the extension writes a default global config.
 - `usage.showResetTimes`: include compact reset countdown + local reset time.
 - `footer.mode`: `replace`, `status`, or `off`.
 
-## Install as a pi package
+## Development
 
-This repository is already shaped as a pi package. After publishing or installing from git, pi discovers `extensions/index.ts` via the `pi.extensions` manifest in `package.json`.
+```bash
+npm test
+```
+
+The extension is split into a small identity module plus the main extension entry point:
+
+- `extensions/identity.ts` owns package identity, config filename, and status key constants.
+- `extensions/index.ts` owns commands, config, usage fetching, fast mode injection, and footer rendering.
+
+## Package layout
+
+This repository is shaped as a pi package. Pi discovers `extensions/index.ts` via the `pi.extensions` manifest in `package.json`.
