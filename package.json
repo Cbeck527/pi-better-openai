@@ -1,33 +1,33 @@
 {
   "name": "pi-better-openai",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Personal pi extension that improves OpenAI with fast mode, usage stats, and footer polish.",
-  "type": "module",
   "keywords": [
-    "pi",
-    "pi-package",
-    "pi-extension",
-    "openai",
-    "gpt",
     "fast",
+    "gpt",
+    "openai",
+    "pi",
+    "pi-extension",
+    "pi-package",
     "priority",
     "service-tier"
   ],
-  "scripts": {
-    "test": "node tests/basic.mjs"
-  },
+  "license": "MIT",
   "files": [
     "extensions/",
     "README.md",
     "LICENSE"
   ],
-  "pi": {
-    "extensions": [
-      "./extensions/pi-better-openai.ts"
-    ]
+  "type": "module",
+  "scripts": {
+    "test": "node tests/basic.mjs"
   },
   "peerDependencies": {
     "@mariozechner/pi-coding-agent": ">=0.57.0"
   },
-  "license": "MIT"
+  "pi": {
+    "extensions": [
+      "./extensions/pi-better-openai.ts"
+    ]
+  }
 }

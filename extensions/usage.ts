@@ -76,7 +76,7 @@ function formatResetClock(seconds: number | null, options?: { includeDate?: bool
 function formatCompactReset(label: string, seconds: number | null, options?: { includeDate?: boolean }): string | null {
   const countdown = formatResetCountdown(seconds);
   const clock = formatResetClock(seconds, options);
-  return countdown && clock ? `${label}↺${countdown} - ${clock}` : null;
+  return countdown && clock ? `${label} ↺ ${countdown} - ${clock}` : null;
 }
 
 export function readCodexAuth(): { accessToken: string; accountId: string } | undefined {
