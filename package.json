@@ -1,0 +1,30 @@
+{
+  "name": "pi-gpt-fast",
+  "version": "0.1.0",
+  "description": "Pi extension that enables OpenAI priority fast mode for configured GPT models.",
+  "type": "module",
+  "keywords": [
+    "pi",
+    "pi-package",
+    "pi-extension",
+    "openai",
+    "gpt",
+    "fast",
+    "priority",
+    "service-tier"
+  ],
+  "files": [
+    "extensions/",
+    "README.md",
+    "LICENSE"
+  ],
+  "pi": {
+    "extensions": [
+      "./extensions/index.ts"
+    ]
+  },
+  "peerDependencies": {
+    "@mariozechner/pi-coding-agent": ">=0.57.0"
+  },
+  "license": "MIT"
+}
