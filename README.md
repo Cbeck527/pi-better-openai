@@ -1,10 +1,10 @@
 # pi-better-openai
 
-A personal pi extension that improves OpenAI in pi with fast mode, usage stats, and footer polish. Fast mode adds `service_tier: "priority"` to provider requests for configured models.
+A personal pi extension that improves OpenAI in pi with fast mode, usage stats, footer polish, and OpenAI image generation through `openai-codex` subscription auth. Fast mode adds `service_tier: "priority"` to provider requests for configured models.
 
 It also customizes the footer to show `gpt-5.5 fast • low` and, when `openai-codex` OAuth credentials are available, Codex usage windows from ChatGPT's usage endpoint.
 
-It does **not** change the selected model, thinking level, tools, or prompts.
+It does **not** change the selected model, thinking level, or prompts. It registers an additional `openai_image` tool for image generation/editing.
 
 ## Install
 
@@ -46,6 +46,8 @@ Commands:
 - `/usage refresh` refetches usage immediately.
 - `/usage debug` shows usage endpoint/auth/fetch diagnostics without printing tokens.
 - `/usage on` / `/usage off` toggles usage display.
+- `/openai-image <prompt>` generates an image through OpenAI Codex subscription auth and saves it to the project by default. Flags: `--image/-i <path[,path]>`, `--action auto|generate|edit`, `--save none|project|global|custom`, `--format png|jpeg|webp`, `--model <id>`, `--save-dir <dir>`.
+- `/openai-image debug` shows image-generation auth/config/endpoint diagnostics.
 - `/openai-status` shows fast mode, usage, footer mode, and config path.
 - `/openai-config`, `/openai-config path`, and `/openai-config print` show config locations or contents.
 - `/openai-footer replace|status|off` controls how the extension renders footer UI.
@@ -89,6 +91,13 @@ If no config exists, the extension writes a default global config.
   },
   "footer": {
     "mode": "replace"
+  },
+  "image": {
+    "enabled": true,
+    "defaultModel": "gpt-5.5",
+    "defaultSave": "project",
+    "outputFormat": "png",
+    "timeoutMs": 180000
   }
 }
 ```
@@ -102,6 +111,17 @@ If no config exists, the extension writes a default global config.
 - `usage.showOnlyOnSubscriptionModels`: only show usage when current OpenAI model uses OAuth/subscription auth.
 - `usage.showResetTimes`: include compact reset countdown + local reset time.
 - `footer.mode`: `replace`, `status`, or `off`.
+- `image.enabled`: allow the `openai_image` tool and `/openai-image` command to make image requests.
+- `image.defaultModel`: model used when the current model is not `openai-codex/*`.
+- `image.defaultSave`: `project` (default), `none`, `global`, or `custom`.
+- `image.outputFormat`: `png`, `jpeg`, or `webp`; Codex currently uses `png` by default.
+- `image.timeoutMs`: image request timeout, clamped between 30 seconds and 5 minutes.
+
+## Image generation
+
+The `openai_image` tool and `/openai-image` command call `https://chatgpt.com/backend-api/codex/responses` with the hosted Responses `image_generation` tool and the `openai-codex` OAuth credentials from `/login openai-codex`. This follows Codex CLI's subscription-auth path and does not require `OPENAI_API_KEY`.
+
+Tool parameters include `prompt`, optional `images` local paths for edit/reference workflows, `action` (`auto`, `generate`, `edit`), `outputFormat`, and save controls. Images are returned inline to pi and saved to `<repo>/.pi/generated-images/` by default.
 
 ## Development
 
@@ -114,8 +134,9 @@ The extension is split into a few small modules plus the main extension entry po
 - `extensions/identity.ts` owns package identity, config filename, and status key constants.
 - `extensions/config.ts` owns config types, defaults, parsing, resolving, and raw-preserving writes.
 - `extensions/usage.ts` owns Codex auth reading, usage endpoint fetching, usage parsing, and usage formatting.
+- `extensions/image.ts` owns OpenAI Codex subscription-auth image generation, image saving, and `/openai-image`.
 - `extensions/format.ts` owns footer text formatting helpers.
-- `extensions/pi-better-openai.ts` wires commands, fast-mode state, usage refresh, provider-request injection, events, and footer rendering.
+- `extensions/pi-better-openai.ts` wires commands, fast-mode state, usage refresh, image generation, provider-request injection, events, and footer rendering.
 
 ## Package layout
 

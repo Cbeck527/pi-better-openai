@@ -4,6 +4,8 @@ import { dirname, join } from "node:path";
 import { CONFIG_BASENAME, logPrefix } from "./identity.ts";
 
 export const FOOTER_MODES = ["replace", "status", "off"] as const;
+export const IMAGE_SAVE_MODES = ["none", "project", "global", "custom"] as const;
+export const IMAGE_OUTPUT_FORMATS = ["png", "jpeg", "webp"] as const;
 
 export const DEFAULT_SUPPORTED_MODELS = [
   "openai/gpt-5.4",
@@ -13,6 +15,8 @@ export const DEFAULT_SUPPORTED_MODELS = [
 ] as const;
 
 export type FooterMode = typeof FOOTER_MODES[number];
+export type ImageSaveMode = typeof IMAGE_SAVE_MODES[number];
+export type ImageOutputFormat = typeof IMAGE_OUTPUT_FORMATS[number];
 
 export type UsageConfig = {
   enabled?: boolean;
@@ -25,6 +29,14 @@ export type FooterConfig = {
   mode?: FooterMode;
 };
 
+export type ImageConfig = {
+  enabled?: boolean;
+  defaultModel?: string;
+  defaultSave?: ImageSaveMode;
+  outputFormat?: ImageOutputFormat;
+  timeoutMs?: number;
+};
+
 export interface ConfigFile {
   persistState?: boolean;
   active?: boolean;
@@ -32,6 +44,7 @@ export interface ConfigFile {
   supportedModels?: string[];
   usage?: UsageConfig;
   footer?: FooterConfig;
+  image?: ImageConfig;
 }
 
 export interface SupportedModel {
@@ -51,6 +64,7 @@ export interface ResolvedConfig {
   supportedModels: SupportedModel[];
   usage: Required<UsageConfig>;
   footer: Required<FooterConfig>;
+  image: Required<ImageConfig>;
 }
 
 export const DEFAULT_USAGE_CONFIG: Required<UsageConfig> = {
@@ -64,13 +78,22 @@ export const DEFAULT_FOOTER_CONFIG: Required<FooterConfig> = {
   mode: "replace"
 };
 
+export const DEFAULT_IMAGE_CONFIG: Required<ImageConfig> = {
+  enabled: true,
+  defaultModel: "gpt-5.5",
+  defaultSave: "project",
+  outputFormat: "png",
+  timeoutMs: 180_000
+};
+
 export const DEFAULT_CONFIG: ConfigFile = {
   persistState: true,
   active: false,
   desiredActive: false,
   supportedModels: [...DEFAULT_SUPPORTED_MODELS],
   usage: DEFAULT_USAGE_CONFIG,
-  footer: DEFAULT_FOOTER_CONFIG
+  footer: DEFAULT_FOOTER_CONFIG,
+  image: DEFAULT_IMAGE_CONFIG
 };
 
 export function isRecord(value: unknown): value is Record<string, unknown> {
@@ -140,6 +163,14 @@ export function readConfig(path: string): ConfigFile | undefined {
   if (isRecord(parsed.footer) && typeof parsed.footer.mode === "string" && (FOOTER_MODES as readonly string[]).includes(parsed.footer.mode)) {
     config.footer = { mode: parsed.footer.mode as FooterMode };
   }
+  if (isRecord(parsed.image)) {
+    config.image = {};
+    if (typeof parsed.image.enabled === "boolean") config.image.enabled = parsed.image.enabled;
+    if (typeof parsed.image.defaultModel === "string" && parsed.image.defaultModel.trim()) config.image.defaultModel = parsed.image.defaultModel.trim();
+    if (typeof parsed.image.defaultSave === "string" && (IMAGE_SAVE_MODES as readonly string[]).includes(parsed.image.defaultSave)) config.image.defaultSave = parsed.image.defaultSave as ImageSaveMode;
+    if (typeof parsed.image.outputFormat === "string" && (IMAGE_OUTPUT_FORMATS as readonly string[]).includes(parsed.image.outputFormat)) config.image.outputFormat = parsed.image.outputFormat as ImageOutputFormat;
+    if (typeof parsed.image.timeoutMs === "number") config.image.timeoutMs = parsed.image.timeoutMs;
+  }
   return config;
 }
 
@@ -190,6 +221,12 @@ export function resolveConfig(cwd: string): ResolvedConfig {
       ...DEFAULT_FOOTER_CONFIG,
       ...(globalConfig.footer ?? {}),
       ...(projectConfig.footer ?? {})
+    },
+    image: {
+      ...DEFAULT_IMAGE_CONFIG,
+      ...(globalConfig.image ?? {}),
+      ...(projectConfig.image ?? {}),
+      timeoutMs: Math.max(30_000, Math.min(5 * 60_000, projectConfig.image?.timeoutMs ?? globalConfig.image?.timeoutMs ?? DEFAULT_IMAGE_CONFIG.timeoutMs))
     }
   };
 }

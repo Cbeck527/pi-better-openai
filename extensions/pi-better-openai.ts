@@ -9,6 +9,7 @@ import { CONFIG_BASENAME, STATUS_KEY } from "./identity.ts";
 import { formatTokens, sanitizeStatusText, truncateToWidth, visibleWidth } from "./format.ts";
 import {
   DEFAULT_CONFIG,
+  DEFAULT_IMAGE_CONFIG,
   DEFAULT_SUPPORTED_MODELS,
   FOOTER_MODES,
   configPaths,
@@ -33,6 +34,7 @@ import {
   readCodexAuth,
   requestCodexUsage
 } from "./usage.ts";
+import { registerOpenAIImage, _imageTest } from "./image.ts";
 
 const COMMAND = "fast";
 const USAGE_COMMAND = "usage";
@@ -240,6 +242,8 @@ export default function betterOpenAI(pi: ExtensionAPI): void {
       `Last injected: ${lastInjectedAt ? `${new Date(lastInjectedAt).toLocaleTimeString()} (${lastInjectedModel}, ${lastInjectedTier})` : "never"}`,
       `Footer mode: ${cfg.footer.mode}`,
       `Usage enabled: ${cfg.usage.enabled}`,
+      `Image enabled: ${cfg.image.enabled}`,
+      `Image default save: ${cfg.image.defaultSave}`,
       `Config: ${cfg.configPath}`
     ].join("\n");
   }
@@ -373,6 +377,7 @@ export default function betterOpenAI(pi: ExtensionAPI): void {
 
   registerFooterCommand(FOOTER_COMMAND);
   registerFooterCommand(OPENAI_FOOTER_COMMAND);
+  registerOpenAIImage(pi, config);
 
   function installFooter(ctx: ExtensionContext): void {
     if (footerInstalled) {
@@ -583,6 +588,7 @@ export const _test = {
   CONFIG_BASENAME,
   DEFAULT_SUPPORTED_MODELS,
   DEFAULT_CONFIG,
+  DEFAULT_IMAGE_CONFIG,
   SERVICE_TIER,
   configPaths,
   parseModelKey,
@@ -594,5 +600,6 @@ export const _test = {
   parseUsageSnapshot,
   formatPercent,
   formatUsageSnapshot,
-  readCodexAuth
+  readCodexAuth,
+  imageTest: _imageTest
 };

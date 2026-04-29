@@ -8,6 +8,7 @@ import { join } from "node:path";
 
 assert.equal(_test.CONFIG_BASENAME, "pi-better-openai.json");
 assert.equal(_test.DEFAULT_CONFIG.desiredActive, false);
+assert.equal(_test.DEFAULT_IMAGE_CONFIG.defaultSave, "project");
 assert.equal(_test.SERVICE_TIER, "priority");
 assert.deepEqual(_test.DEFAULT_SUPPORTED_MODELS, [
   "openai/gpt-5.4",
@@ -21,6 +22,10 @@ assert.equal(_test.parseModelKey("bad"), undefined);
 assert.deepEqual(_test.normalizeModelKeys(["openai/gpt-5.5", "bad", 42]), ["openai/gpt-5.5"]);
 assert.equal(_test.formatPercent(99.4), "99%");
 assert.equal(_test.formatPercent(null), "--");
+assert.equal(_test.imageTest.OPENAI_IMAGE_TOOL, "openai_image");
+assert.equal(_test.imageTest.imageMimeType("x.jpg"), "image/jpeg");
+assert.deepEqual(_test.imageTest.dataUrlParts("data:image/png;base64,Zm9v", "image/png"), { data: "Zm9v", mimeType: "image/png" });
+assert.equal(_test.imageTest.extractImageFromEvent({ type: "response.output_item.done", item: { type: "image_generation_call", id: "ig_1", status: "completed", result: "Zm9v" } }, "image/png").data, "Zm9v");
 
 const usage = _test.parseUsageSnapshot(
   {
@@ -57,6 +62,13 @@ try {
   writeConfig(configPath, { ...afterActiveWrite, usage: { ...currentUsage, enabled: false } });
   const afterUsageWrite = readRawConfig(configPath);
   assert.deepEqual(afterUsageWrite.usage, { enabled: false, unknownUsageField: 123 });
+
+  const projectConfigPath = _test.configPaths(tempDir).project;
+  writeConfig(projectConfigPath, { image: { defaultSave: "global", outputFormat: "webp", timeoutMs: 1 } });
+  const resolved = _test.resolveConfig(tempDir);
+  assert.equal(resolved.image.defaultSave, "global");
+  assert.equal(resolved.image.outputFormat, "webp");
+  assert.equal(resolved.image.timeoutMs, 30000);
 } finally {
   rmSync(tempDir, { recursive: true, force: true });
 }
