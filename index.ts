@@ -57,8 +57,9 @@ function currentModelKey(ctx: ExtensionContext): string {
 }
 
 function supportsFast(ctx: ExtensionContext, supportedModels: SupportedModel[]): boolean {
-  if (!ctx.model) return false;
-  return supportedModels.some((model) => model.provider === ctx.model.provider && model.id === ctx.model.id);
+  const current = ctx.model;
+  if (!current) return false;
+  return supportedModels.some((model) => model.provider === current.provider && model.id === current.id);
 }
 
 function modelList(supportedModels: SupportedModel[]): string {

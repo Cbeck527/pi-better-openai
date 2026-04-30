@@ -74,6 +74,8 @@ export type CodexImageResult = {
   outputFormat: ImageOutputFormat;
 };
 
+type ExtractedImageResult = Omit<CodexImageResult, "prompt" | "savedPath" | "model" | "action" | "outputFormat">;
+
 export type ImageGenerationDebug = {
   authFound: boolean;
   authSource?: string;
@@ -224,7 +226,11 @@ function asImageResultItem(value: unknown): { id?: string; status?: string; revi
   return value as { id?: string; status?: string; revised_prompt?: string; result?: string; b64_json?: string };
 }
 
-function extractImageFromEvent(event: unknown, fallbackMimeType: string): Omit<CodexImageResult, "savedPath" | "model" | "action" | "outputFormat"> | undefined {
+function isImageContent(value: unknown): value is { type: "image"; data: string; mimeType: string } {
+  return isRecord(value) && value.type === "image" && typeof value.data === "string" && typeof value.mimeType === "string";
+}
+
+function extractImageFromEvent(event: unknown, fallbackMimeType: string): ExtractedImageResult | undefined {
   if (!isRecord(event)) return undefined;
   const item = asImageResultItem(event.item) ?? asImageResultItem(event);
   if (item) {
@@ -247,12 +253,12 @@ function extractImageFromEvent(event: unknown, fallbackMimeType: string): Omit<C
   return undefined;
 }
 
-async function parseSseForImage(response: Response, fallbackMimeType: string, signal?: AbortSignal): Promise<Omit<CodexImageResult, "savedPath" | "model" | "action" | "outputFormat">> {
+async function parseSseForImage(response: Response, fallbackMimeType: string, signal?: AbortSignal): Promise<ExtractedImageResult> {
   if (!response.body) throw new Error("No response body from Codex image request.");
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
-  let lastImage: Omit<CodexImageResult, "savedPath" | "model" | "action" | "outputFormat"> | undefined;
+  let lastImage: ExtractedImageResult | undefined;
   try {
     while (true) {
       if (signal?.aborted) throw new Error("Image request was aborted.");
@@ -429,11 +435,13 @@ export function registerOpenAIImage(pi: ExtensionAPI, getConfig: (ctx: Extension
         : typeof message.content === "string"
           ? message.content
           : message.content.filter((part) => part.type === "text").map((part) => part.text).join("\n");
-      const image = result && isRecord(result) && typeof result.data === "string" && typeof result.mimeType === "string"
-        ? { data: result.data, mimeType: result.mimeType, savedPath: typeof result.savedPath === "string" ? result.savedPath : undefined }
-        : Array.isArray(message.content)
-          ? message.content.find((part) => part.type === "image" && typeof part.data === "string" && typeof part.mimeType === "string")
-          : undefined;
+      let image: { data: string; mimeType: string; savedPath?: string } | undefined;
+      if (result && isRecord(result) && typeof result.data === "string" && typeof result.mimeType === "string") {
+        image = { data: result.data, mimeType: result.mimeType, savedPath: typeof result.savedPath === "string" ? result.savedPath : undefined };
+      } else if (Array.isArray(message.content)) {
+        const imagePart = message.content.find(isImageContent);
+        if (imagePart) image = { data: imagePart.data, mimeType: imagePart.mimeType };
+      }
 
       const container = new Container();
       const box = new Box(1, 1, (line) => theme.bg("customMessageBg", line));
@@ -487,7 +495,7 @@ export function registerOpenAIImage(pi: ExtensionAPI, getConfig: (ctx: Extension
       const cfg = getConfig(ctx);
       const model = resolveModel(params, ctx, cfg);
       const requestParams = { ...params, prompt: resolveToolPrompt(params, ctx) };
-      onUpdate?.({ content: [{ type: "text", text: `Requesting OpenAI image via openai-codex/${model}...` }] });
+      onUpdate?.({ content: [{ type: "text", text: `Requesting OpenAI image via openai-codex/${model}...` }], details: undefined });
       const result = await generate(requestParams, ctx, signal);
       return {
         content: [

@@ -29,7 +29,8 @@
     "access": "public"
   },
   "scripts": {
-    "test": "node tests/basic.mjs"
+    "test": "node tests/basic.mjs",
+    "typecheck": "tsc --noEmit"
   },
   "peerDependencies": {
     "@mariozechner/pi-coding-agent": ">=0.57.0",
@@ -39,5 +40,9 @@
     "extensions": [
       "./index.ts"
     ]
+  },
+  "devDependencies": {
+    "@types/node": "^25.6.0",
+    "typescript": "^6.0.3"
   }
 }
