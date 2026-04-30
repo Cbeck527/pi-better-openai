@@ -44,8 +44,9 @@ pi --fast
 - OpenAI subscription usage display via `/openai-usage` and the footer.
 - Interactive settings picker via `/openai-settings`.
 - Footer customization for model, thinking, fast mode, usage, and token/cost context.
-- OpenAI image generation/editing through the `openai_image` tool.
+- OpenAI image generation/editing through the `openai_image` tool and `/openai-image` command.
 - Commands:
   - `/fast` toggles fast mode.
+  - `/openai-image <prompt>` generates an image directly.
   - `/openai-usage` shows current OpenAI subscription usage.
   - `/openai-settings` opens settings, diagnostics, and config details.

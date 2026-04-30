@@ -8,6 +8,7 @@ import { isRecord } from "./config.ts";
 import { readCodexAuth } from "./usage.ts";
 
 const OPENAI_IMAGE_TOOL = "openai_image";
+const OPENAI_IMAGE_COMMAND = "openai-image";
 const CODEX_RESPONSES_URL = "https://chatgpt.com/backend-api/codex/responses";
 const DEFAULT_TIMEOUT_MS = 180_000;
 
@@ -387,6 +388,28 @@ export function registerOpenAIImage(pi: ExtensionAPI, getConfig: (ctx: Extension
     };
   }
 
+  pi.registerCommand(OPENAI_IMAGE_COMMAND, {
+    description: "Generate an image with OpenAI Codex image generation",
+    handler: async (args, ctx) => {
+      const prompt = args.trim();
+      if (!prompt) {
+        ctx.ui.notify("Usage: /openai-image <prompt>", "error");
+        return;
+      }
+      ctx.ui.notify("Requesting OpenAI image...", "info");
+      const result = await generate({ prompt }, ctx);
+      pi.sendMessage({
+        customType: "openai-image",
+        content: [
+          { type: "text", text: resultText(result) },
+          { type: "image", data: result.data, mimeType: result.mimeType }
+        ],
+        display: true,
+        details: result
+      });
+    }
+  });
+
   pi.registerTool({
     name: OPENAI_IMAGE_TOOL,
     label: "OpenAI image",
@@ -419,6 +442,7 @@ export const _imageTest = {
   CODEX_RESPONSES_URL,
   DEFAULT_TIMEOUT_MS,
   OPENAI_IMAGE_TOOL,
+  OPENAI_IMAGE_COMMAND,
   extractAccountIdFromJwt,
   imageMimeType,
   dataUrlParts,
