@@ -43,14 +43,13 @@ const OPENAI_STATUS_COMMAND = "openai-usage";
 const OPENAI_SETTINGS_COMMAND = "openai-settings";
 const FLAG = "fast";
 const SERVICE_TIER = "priority";
-const SETTINGS_COMMAND_ARGS = ["path", "print", "debug"] as const;
-
 type SettingsPickerItem = {
   id: string;
   label: string;
   description?: string;
   currentValue: string;
   values?: string[];
+  submenu?: (currentValue: string, done: (selectedValue?: string) => void) => { render(width: number): string[]; invalidate(): void; handleInput?(data: string): void };
 };
 
 function currentModelKey(ctx: ExtensionContext): string {
@@ -275,7 +274,20 @@ export default function betterOpenAI(pi: ExtensionAPI): void {
     }
   });
 
-  function buildSettingsItems(cfg: ResolvedConfig): SettingsPickerItem[] {
+  function textPanel(title: string, lines: string[], done: () => void) {
+    return {
+      render(width: number) {
+        const clipped = lines.map((line) => truncateToWidth(line, width, "..."));
+        return [title, "", ...clipped, "", "Esc/q to go back"];
+      },
+      invalidate() {},
+      handleInput(data: string) {
+        if (data.includes("\x1b") || data === "escape" || data === "q" || data === "\x03") done();
+      }
+    };
+  }
+
+  function buildSettingsItems(ctx: ExtensionContext, cfg: ResolvedConfig): SettingsPickerItem[] {
     return [
       { id: "fast.enabled", label: "Fast mode", currentValue: String(desiredActive), values: ["true", "false"], description: `Request OpenAI fast mode. Activates for supported models: ${modelList(cfg.supportedModels)}.` },
       { id: "persistState", label: "Persist fast state", currentValue: String(cfg.persistState), values: ["true", "false"], description: "Remember fast-mode state across sessions." },
@@ -288,7 +300,10 @@ export default function betterOpenAI(pi: ExtensionAPI): void {
       { id: "image.defaultModel", label: "Image model", currentValue: cfg.image.defaultModel, values: ["gpt-5.5", "gpt-5.4", "gpt-5.2", "gpt-5"], description: "Mainline model used for image generation when current model is not openai-codex." },
       { id: "image.defaultSave", label: "Image save", currentValue: cfg.image.defaultSave, values: [...IMAGE_SAVE_MODES], description: "Where generated images are saved by default." },
       { id: "image.outputFormat", label: "Image format", currentValue: cfg.image.outputFormat, values: [...IMAGE_OUTPUT_FORMATS], description: "Generated image file format." },
-      { id: "image.timeoutMs", label: "Image timeout", currentValue: String(cfg.image.timeoutMs), values: ["30000", "60000", "120000", "180000", "300000"], description: "Image request timeout in milliseconds." }
+      { id: "image.timeoutMs", label: "Image timeout", currentValue: String(cfg.image.timeoutMs), values: ["30000", "60000", "120000", "180000", "300000"], description: "Image request timeout in milliseconds." },
+      { id: "debug", label: "Debug info", currentValue: "open", description: "Show Better OpenAI diagnostics.", submenu: (_value, done) => textPanel("Debug info", formatDebugStatus(ctx).split("\n"), () => done()) },
+      { id: "config.path", label: "Config path", currentValue: cfg.configPath, description: `Project: ${cfg.projectConfigPath}\nGlobal: ${cfg.globalConfigPath}` },
+      { id: "config.print", label: "Print config", currentValue: "open", description: "Show the selected raw config JSON.", submenu: (_value, done) => textPanel("Config", JSON.stringify(readRawConfig(cfg.configPath), null, 2).split("\n"), () => done()) }
     ];
   }
 
@@ -349,12 +364,12 @@ export default function betterOpenAI(pi: ExtensionAPI): void {
         invalidate() {}
       })());
       const settingsList = new SettingsList(
-        buildSettingsItems(refresh(ctx)),
+        buildSettingsItems(ctx, refresh(ctx)),
         13,
         getSettingsListTheme(),
         (id, newValue) => {
           writeSetting(ctx, id, newValue);
-          settingsList.updateValue(id, buildSettingsItems(config(ctx)).find((item) => item.id === id)?.currentValue ?? newValue);
+          settingsList.updateValue(id, buildSettingsItems(ctx, config(ctx)).find((item) => item.id === id)?.currentValue ?? newValue);
           tui.requestRender();
         },
         () => done(undefined),
@@ -374,16 +389,7 @@ export default function betterOpenAI(pi: ExtensionAPI): void {
 
   pi.registerCommand(OPENAI_SETTINGS_COMMAND, {
     description: "Open Better OpenAI settings picker",
-    getArgumentCompletions: (prefix) => {
-      const items = SETTINGS_COMMAND_ARGS.filter((arg) => arg.startsWith(prefix)).map((arg) => ({ value: arg, label: arg }));
-      return items.length ? items : null;
-    },
-    handler: async (args, ctx) => {
-      const cfg = refresh(ctx);
-      const arg = args.trim().toLowerCase();
-      if (arg === "path") return ctx.ui.notify(cfg.configPath, "info");
-      if (arg === "print") return ctx.ui.notify(JSON.stringify(readRawConfig(cfg.configPath), null, 2), "info");
-      if (arg === "debug") return ctx.ui.notify(formatDebugStatus(ctx), "info");
+    handler: async (_args, ctx) => {
       await showSettingsPicker(ctx);
     }
   });
