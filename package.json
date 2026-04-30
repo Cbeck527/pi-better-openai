@@ -1,6 +1,6 @@
 {
   "name": "pi-better-openai",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Personal pi extension that improves OpenAI with fast mode, usage stats, and footer polish.",
   "keywords": [
     "fast",
@@ -14,12 +14,19 @@
     "service-tier"
   ],
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mattleong/pi-better-openai.git"
+  },
   "files": [
     "extensions/",
     "README.md",
     "LICENSE"
   ],
   "type": "module",
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "test": "node tests/basic.mjs"
   },
