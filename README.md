@@ -7,7 +7,7 @@ A pi extension for OpenAI subscription workflows: fast mode, usage visibility, f
 Install from GitHub:
 
 ```bash
-pi install github:mattleong/pi-better-openai
+pi install git:github.com/mattleong/pi-better-openai
 ```
 
 Or install from npm:
