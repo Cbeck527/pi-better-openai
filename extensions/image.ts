@@ -7,7 +7,6 @@ import type { ResolvedConfig } from "./config.ts";
 import { isRecord } from "./config.ts";
 import { readCodexAuth } from "./usage.ts";
 
-const OPENAI_IMAGE_COMMAND = "openai-image";
 const OPENAI_IMAGE_TOOL = "openai_image";
 const CODEX_RESPONSES_URL = "https://chatgpt.com/backend-api/codex/responses";
 const DEFAULT_TIMEOUT_MS = 180_000;
@@ -204,7 +203,7 @@ function buildRequest(params: ToolParams, model: string, cfg: ResolvedConfig, im
     instructions: "",
     input: [{ role: "user", content }],
     tools: [tool],
-    tool_choice: "auto",
+    tool_choice: { type: "image_generation" },
     parallel_tool_calls: false,
     store: false,
     stream: true,
@@ -349,102 +348,7 @@ function resultText(result: CodexImageResult): string {
   return parts.join("\n");
 }
 
-function shellWords(input: string): string[] {
-  const words: string[] = [];
-  let current = "";
-  let quote: '"' | "'" | undefined;
-  let escaping = false;
-  for (const ch of input) {
-    if (escaping) {
-      current += ch;
-      escaping = false;
-      continue;
-    }
-    if (ch === "\\" && quote !== "'") {
-      escaping = true;
-      continue;
-    }
-    if ((ch === '"' || ch === "'") && (!quote || quote === ch)) {
-      quote = quote ? undefined : ch;
-      continue;
-    }
-    if (!quote && /\s/.test(ch)) {
-      if (current) {
-        words.push(current);
-        current = "";
-      }
-      continue;
-    }
-    current += ch;
-  }
-  if (current) words.push(current);
-  return words;
-}
-
-function parseCommandArgs(args: string): { mode: "debug" } | { mode: "prompt"; params: ToolParams } | { mode: "usage" } {
-  const trimmed = args.trim();
-  if (!trimmed) return { mode: "usage" };
-  if (trimmed.toLowerCase() === "debug") return { mode: "debug" };
-  const words = shellWords(trimmed);
-  const params: ToolParams = { prompt: "" };
-  const promptParts: string[] = [];
-  for (let i = 0; i < words.length; i++) {
-    const word = words[i];
-    const next = () => words[++i] ?? "";
-    if (word === "--") {
-      promptParts.push(...words.slice(i + 1));
-      break;
-    }
-    if (word === "--image" || word === "-i") {
-      const values = next().split(",").map((value) => value.trim()).filter(Boolean);
-      params.images = [...(params.images ?? []), ...values];
-    } else if (word === "--action") {
-      const value = next() as ImageAction;
-      if ((IMAGE_ACTIONS as readonly string[]).includes(value)) params.action = value;
-    } else if (word === "--model") {
-      params.model = next();
-    } else if (word === "--save") {
-      const value = next() as ImageSaveMode;
-      if ((IMAGE_SAVE_MODES as readonly string[]).includes(value)) params.save = value;
-    } else if (word === "--save-dir") {
-      params.saveDir = next();
-    } else if (word === "--format" || word === "--output-format") {
-      const value = next() as ImageOutputFormat;
-      if ((IMAGE_OUTPUT_FORMATS as readonly string[]).includes(value)) params.outputFormat = value;
-    } else {
-      promptParts.push(word);
-    }
-  }
-  params.prompt = promptParts.join(" ").trim();
-  return params.prompt ? { mode: "prompt", params } : { mode: "usage" };
-}
-
-function registerOpenAIImageRenderer(pi: ExtensionAPI): void {
-  void import("@mariozechner/pi-tui").then(({ Box, Image, Text }) => {
-    pi.registerMessageRenderer("openai-image", (message: any, _options: any, theme: any) => {
-      const content = Array.isArray(message.content) ? message.content : [{ type: "text", text: String(message.content ?? "") }];
-      const text = content
-        .filter((entry: any) => entry?.type === "text" && typeof entry.text === "string")
-        .map((entry: any) => entry.text)
-        .join("\n");
-      const image = content.find((entry: any) => entry?.type === "image" && typeof entry.data === "string");
-      const box = new Box(1, 1, (value: string) => theme.bg("customMessageBg", value));
-      box.addChild(new Text(text || "Generated OpenAI image."));
-      if (image) {
-        box.addChild(new Image(
-          image.data,
-          image.mimeType || "image/png",
-          { fallbackColor: (value: string) => theme.fg("dim", value) },
-          { maxWidthCells: 80, maxHeightCells: 32 }
-        ));
-      }
-      return box;
-    });
-  }).catch(() => undefined);
-}
-
 export function registerOpenAIImage(pi: ExtensionAPI, getConfig: (ctx: ExtensionContext) => ResolvedConfig): { getDebug: (ctx: ExtensionContext) => Promise<ImageGenerationDebug> } {
-  registerOpenAIImageRenderer(pi);
   let lastStatus: string | undefined;
   let lastError: string | undefined;
 
@@ -508,46 +412,6 @@ export function registerOpenAIImage(pi: ExtensionAPI, getConfig: (ctx: Extension
     }
   });
 
-  pi.registerCommand(OPENAI_IMAGE_COMMAND, {
-    description: "Generate an OpenAI image or show image-generation debug info",
-    getArgumentCompletions: (prefix) => {
-      const items = ["debug"].filter((arg) => arg.startsWith(prefix)).map((arg) => ({ value: arg, label: arg }));
-      return items.length ? items : null;
-    },
-    handler: async (args, ctx) => {
-      const parsed = parseCommandArgs(args);
-      if (parsed.mode === "usage") {
-        ctx.ui.notify(`Usage: /${OPENAI_IMAGE_COMMAND} <prompt> | debug`, "info");
-        return;
-      }
-      if (parsed.mode === "debug") {
-        const debug = await getDebug(ctx);
-        ctx.ui.notify([
-          `Enabled: ${debug.enabled}`,
-          `Auth: ${debug.authFound ? `found (${debug.authSource})` : "missing"}`,
-          `Account ID: ${debug.accountId ?? "none"}`,
-          `Endpoint: ${debug.endpoint}`,
-          `Default model: ${debug.defaultModel}`,
-          `Default save: ${debug.defaultSave}`,
-          `Last status: ${debug.lastStatus ?? "none"}`,
-          `Last error: ${debug.lastError ?? "none"}`
-        ].join("\n"), debug.authFound ? "info" : "warning");
-        return;
-      }
-      ctx.ui.notify("Generating OpenAI image...", "info");
-      const result = await generate(parsed.params, ctx);
-      pi.sendMessage({
-        customType: "openai-image",
-        display: true,
-        content: [
-          { type: "text", text: resultText(result) },
-          { type: "image", data: result.data, mimeType: result.mimeType }
-        ],
-        details: result
-      });
-    }
-  });
-
   return { getDebug };
 }
 
@@ -555,7 +419,6 @@ export const _imageTest = {
   CODEX_RESPONSES_URL,
   DEFAULT_TIMEOUT_MS,
   OPENAI_IMAGE_TOOL,
-  OPENAI_IMAGE_COMMAND,
   extractAccountIdFromJwt,
   imageMimeType,
   dataUrlParts,

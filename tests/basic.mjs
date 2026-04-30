@@ -26,6 +26,7 @@ assert.equal(_test.imageTest.OPENAI_IMAGE_TOOL, "openai_image");
 assert.equal(_test.imageTest.imageMimeType("x.jpg"), "image/jpeg");
 assert.deepEqual(_test.imageTest.dataUrlParts("data:image/png;base64,Zm9v", "image/png"), { data: "Zm9v", mimeType: "image/png" });
 assert.equal(_test.imageTest.extractImageFromEvent({ type: "response.output_item.done", item: { type: "image_generation_call", id: "ig_1", status: "completed", result: "Zm9v" } }, "image/png").data, "Zm9v");
+assert.deepEqual(_test.imageTest.buildRequest({ prompt: "draw an otter" }, "gpt-5.5", { image: _test.DEFAULT_IMAGE_CONFIG }, []).tool_choice, { type: "image_generation" });
 
 const usage = _test.parseUsageSnapshot(
   {

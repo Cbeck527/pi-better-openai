@@ -12,6 +12,8 @@ import {
   DEFAULT_IMAGE_CONFIG,
   DEFAULT_SUPPORTED_MODELS,
   FOOTER_MODES,
+  IMAGE_OUTPUT_FORMATS,
+  IMAGE_SAVE_MODES,
   configPaths,
   type FooterMode,
   type ResolvedConfig,
@@ -37,15 +39,20 @@ import {
 import { registerOpenAIImage, _imageTest } from "./image.ts";
 
 const COMMAND = "fast";
-const USAGE_COMMAND = "usage";
-const FOOTER_COMMAND = "fast-footer";
-const OPENAI_FOOTER_COMMAND = "openai-footer";
-const OPENAI_STATUS_COMMAND = "openai-status";
-const OPENAI_CONFIG_COMMAND = "openai-config";
+const OPENAI_STATUS_COMMAND = "openai-usage";
+const OPENAI_SETTINGS_COMMAND = "openai-settings";
 const FLAG = "fast";
 const SERVICE_TIER = "priority";
-const COMMAND_ARGS = ["on", "off", "status", "models", "debug"] as const;
-const USAGE_COMMAND_ARGS = ["status", "refresh", "on", "off", "debug"] as const;
+const COMMAND_ARGS = ["models"] as const;
+const SETTINGS_COMMAND_ARGS = ["path", "print", "debug"] as const;
+
+type SettingsPickerItem = {
+  id: string;
+  label: string;
+  description?: string;
+  currentValue: string;
+  values?: string[];
+};
 
 function currentModelKey(ctx: ExtensionContext): string {
   return ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : "none";
@@ -249,13 +256,8 @@ export default function betterOpenAI(pi: ExtensionAPI): void {
   }
 
   function formatOpenAIStatus(ctx: ExtensionContext): string {
-    const cfg = refresh(ctx);
-    return [
-      stateText(ctx, desiredActive, active, cfg.supportedModels),
-      formatUsageStatus(ctx),
-      `Footer mode: ${cfg.footer.mode}`,
-      `Config: ${cfg.configPath}`
-    ].join("\n");
+    refresh(ctx);
+    return formatUsageStatus(ctx);
   }
 
   pi.registerCommand(COMMAND, {
@@ -267,116 +269,135 @@ export default function betterOpenAI(pi: ExtensionAPI): void {
     handler: async (args, ctx) => {
       const arg = args.trim().toLowerCase();
       if (!arg) return setActive(ctx, !desiredActive);
-      if (arg === "on") return setActive(ctx, true);
-      if (arg === "off") return setActive(ctx, false);
-      if (arg === "status") {
-        ctx.ui.notify(formatOpenAIStatus(ctx), "info");
-        return;
-      }
-      if (arg === "debug") {
-        ctx.ui.notify(formatDebugStatus(ctx), "info");
-        return;
-      }
       if (arg === "models") {
         ctx.ui.notify(`Fast-mode supported models: ${modelList(refresh(ctx).supportedModels)}.`, "info");
         return;
       }
-      ctx.ui.notify("Usage: /fast [on|off|status|models|debug]", "error");
+      ctx.ui.notify("Usage: /fast [models]", "error");
     }
   });
 
   pi.registerCommand(OPENAI_STATUS_COMMAND, {
-    description: "Show Better OpenAI fast, usage, footer, and config status",
+    description: "Show OpenAI subscription usage status",
     handler: async (_args, ctx) => {
       ctx.ui.notify(formatOpenAIStatus(ctx), "info");
     }
   });
 
-  pi.registerCommand(OPENAI_CONFIG_COMMAND, {
-    description: "Show Better OpenAI config paths and selected config",
+  function buildSettingsItems(cfg: ResolvedConfig): SettingsPickerItem[] {
+    return [
+      { id: "fast.enabled", label: "Fast mode", currentValue: String(desiredActive), values: ["true", "false"], description: "Request OpenAI fast mode. It activates when the current model is in the supported model list." },
+      { id: "persistState", label: "Persist fast state", currentValue: String(cfg.persistState), values: ["true", "false"], description: "Remember fast-mode state across sessions." },
+      { id: "footer.mode", label: "Footer mode", currentValue: cfg.footer.mode, values: [...FOOTER_MODES], description: "replace = custom footer, status = pi footer plus status line, off = no Better OpenAI footer/status." },
+      { id: "usage.enabled", label: "Usage display", currentValue: String(cfg.usage.enabled), values: ["true", "false"], description: "Fetch and display OpenAI subscription usage windows." },
+      { id: "usage.refreshIntervalMs", label: "Usage refresh", currentValue: String(cfg.usage.refreshIntervalMs), values: ["15000", "30000", "60000", "120000", "300000", "600000"], description: "Usage refresh interval in milliseconds." },
+      { id: "usage.showOnlyOnSubscriptionModels", label: "Usage only on OAuth", currentValue: String(cfg.usage.showOnlyOnSubscriptionModels), values: ["true", "false"], description: "Only show usage when the current OpenAI model uses subscription/OAuth auth." },
+      { id: "usage.showResetTimes", label: "Usage reset times", currentValue: String(cfg.usage.showResetTimes), values: ["true", "false"], description: "Include compact reset countdowns and local reset times." },
+      { id: "image.enabled", label: "Image tool", currentValue: String(cfg.image.enabled), values: ["true", "false"], description: "Allow the openai_image tool to make image requests." },
+      { id: "image.defaultModel", label: "Image model", currentValue: cfg.image.defaultModel, values: ["gpt-5.5", "gpt-5.4", "gpt-5.2", "gpt-5"], description: "Mainline model used for image generation when current model is not openai-codex." },
+      { id: "image.defaultSave", label: "Image save", currentValue: cfg.image.defaultSave, values: [...IMAGE_SAVE_MODES], description: "Where generated images are saved by default." },
+      { id: "image.outputFormat", label: "Image format", currentValue: cfg.image.outputFormat, values: [...IMAGE_OUTPUT_FORMATS], description: "Generated image file format." },
+      { id: "image.timeoutMs", label: "Image timeout", currentValue: String(cfg.image.timeoutMs), values: ["30000", "60000", "120000", "180000", "300000"], description: "Image request timeout in milliseconds." }
+    ];
+  }
+
+  function writeSetting(ctx: ExtensionContext, id: string, rawValue: string): void {
+    const cfg = refresh(ctx);
+    const current = readRawConfig(cfg.configPath);
+    const bool = rawValue === "true";
+    const num = Number(rawValue);
+    if (id === "fast.enabled") {
+      desiredActive = bool;
+      applyDesiredFastState(ctx, cfg);
+      if (cfg.persistState) {
+        current.active = active;
+        current.desiredActive = desiredActive;
+      }
+    } else if (id === "persistState") current.persistState = bool;
+    else if (id.startsWith("usage.")) {
+      const usage = isRecord(current.usage) ? current.usage : {};
+      const key = id.slice("usage.".length);
+      usage[key] = key === "refreshIntervalMs" ? num : bool;
+      current.usage = usage;
+    } else if (id === "footer.mode") {
+      const footer = isRecord(current.footer) ? current.footer : {};
+      footer.mode = rawValue;
+      current.footer = footer;
+    } else if (id.startsWith("image.")) {
+      const image = isRecord(current.image) ? current.image : {};
+      const key = id.slice("image.".length);
+      image[key] = key === "timeoutMs" ? num : rawValue === "true" ? true : rawValue === "false" ? false : rawValue;
+      current.image = image;
+    }
+    writeConfig(cfg.configPath, current);
+    const next = refresh(ctx);
+    if (id.startsWith("usage.")) {
+      if (usageTimer) clearInterval(usageTimer);
+      usageTimer = undefined;
+      if (next.usage.enabled) startUsageRefresh(ctx);
+      else {
+        usageSnapshot = undefined;
+        usageError = "Usage display is disabled.";
+      }
+    }
+    updateFooter(ctx);
+  }
+
+  async function showSettingsPicker(ctx: ExtensionContext): Promise<void> {
+    const [{ getSettingsListTheme }, { Container, SettingsList }] = await Promise.all([
+      import("@mariozechner/pi-coding-agent"),
+      import("@mariozechner/pi-tui")
+    ]);
+    await ctx.ui.custom((tui, theme, _kb, done) => {
+      const container = new Container();
+      container.addChild(new (class {
+        render(_width: number) {
+          const cfg = config(ctx);
+          return [theme.fg("accent", theme.bold("Better OpenAI Settings")), theme.fg("dim", cfg.configPath), ""];
+        }
+        invalidate() {}
+      })());
+      const settingsList = new SettingsList(
+        buildSettingsItems(refresh(ctx)),
+        13,
+        getSettingsListTheme(),
+        (id, newValue) => {
+          writeSetting(ctx, id, newValue);
+          settingsList.updateValue(id, buildSettingsItems(config(ctx)).find((item) => item.id === id)?.currentValue ?? newValue);
+          tui.requestRender();
+        },
+        () => done(undefined),
+        { enableSearch: true }
+      );
+      container.addChild(settingsList);
+      return {
+        render(width: number) { return container.render(width); },
+        invalidate() { container.invalidate(); },
+        handleInput(data: string) {
+          settingsList.handleInput(data);
+          tui.requestRender();
+        }
+      };
+    });
+  }
+
+  pi.registerCommand(OPENAI_SETTINGS_COMMAND, {
+    description: "Open Better OpenAI settings picker",
     getArgumentCompletions: (prefix) => {
-      const items = ["path", "print"].filter((arg) => arg.startsWith(prefix)).map((arg) => ({ value: arg, label: arg }));
+      const items = SETTINGS_COMMAND_ARGS.filter((arg) => arg.startsWith(prefix)).map((arg) => ({ value: arg, label: arg }));
       return items.length ? items : null;
     },
     handler: async (args, ctx) => {
       const cfg = refresh(ctx);
       const arg = args.trim().toLowerCase();
-      if (arg === "path") {
-        ctx.ui.notify(cfg.configPath, "info");
-        return;
-      }
-      if (arg === "print") {
-        ctx.ui.notify(JSON.stringify(readRawConfig(cfg.configPath), null, 2), "info");
-        return;
-      }
-      ctx.ui.notify([
-        `Selected config: ${cfg.configPath}`,
-        `Project config: ${cfg.projectConfigExists ? "found" : "not found"} (${cfg.projectConfigPath})`,
-        `Global config: ${cfg.globalConfigExists ? "found" : "not found"} (${cfg.globalConfigPath})`,
-        "Usage: /openai-config [path|print]"
-      ].join("\n"), "info");
+      if (arg === "path") return ctx.ui.notify(cfg.configPath, "info");
+      if (arg === "print") return ctx.ui.notify(JSON.stringify(readRawConfig(cfg.configPath), null, 2), "info");
+      if (arg === "debug") return ctx.ui.notify(formatDebugStatus(ctx), "info");
+      await showSettingsPicker(ctx);
     }
   });
 
-  pi.registerCommand(USAGE_COMMAND, {
-    description: "Show, refresh, enable, or disable OpenAI subscription usage in the footer",
-    getArgumentCompletions: (prefix) => {
-      const items = USAGE_COMMAND_ARGS.filter((arg) => arg.startsWith(prefix)).map((arg) => ({ value: arg, label: arg }));
-      return items.length ? items : null;
-    },
-    handler: async (args, ctx) => {
-      const arg = args.trim().toLowerCase() || "status";
-      const cfg = refresh(ctx);
-      if (arg === "status") return ctx.ui.notify(formatUsageStatus(ctx), usageSnapshot ? "info" : "warning");
-      if (arg === "debug") return ctx.ui.notify(formatUsageDebug(ctx), "info");
-      if (arg === "refresh") return refreshUsage(ctx, ctx.model?.id, { notify: true });
-      if (arg === "on" || arg === "off") {
-        const current = readRawConfig(cfg.configPath);
-        const currentUsage = isRecord(current.usage) ? current.usage : {};
-        const nextUsage = { ...currentUsage, enabled: arg === "on" };
-        writeConfig(cfg.configPath, { ...current, usage: nextUsage });
-        refresh(ctx);
-        if (arg === "on") startUsageRefresh(ctx);
-        else {
-          if (usageTimer) clearInterval(usageTimer);
-          usageTimer = undefined;
-          usageSnapshot = undefined;
-          usageError = "Usage display is disabled.";
-          updateFooter(ctx);
-        }
-        ctx.ui.notify(`Usage display ${arg === "on" ? "enabled" : "disabled"}.`, "info");
-        return;
-      }
-      ctx.ui.notify("Usage: /usage [status|refresh|on|off|debug]", "error");
-    }
-  });
 
-  function registerFooterCommand(name: string): void {
-    pi.registerCommand(name, {
-      description: "Set footer mode: replace | status | off",
-      getArgumentCompletions: (prefix) => {
-        const items = FOOTER_MODES.filter((mode) => mode.startsWith(prefix)).map((mode) => ({ value: mode, label: mode }));
-        return items.length ? items : null;
-      },
-      handler: async (args, ctx) => {
-        const mode = args.trim().toLowerCase() as FooterMode;
-        if (!(FOOTER_MODES as readonly string[]).includes(mode)) {
-          ctx.ui.notify(`Footer mode is ${config(ctx).footer.mode}. Usage: /${name} [replace|status|off]`, "info");
-          return;
-        }
-        const cfg = refresh(ctx);
-        const current = readRawConfig(cfg.configPath);
-        const currentFooter = isRecord(current.footer) ? current.footer : {};
-        writeConfig(cfg.configPath, { ...current, footer: { ...currentFooter, mode } });
-        refresh(ctx);
-        updateFooter(ctx);
-        ctx.ui.notify(`Footer mode set to ${mode}.`, "info");
-      }
-    });
-  }
-
-  registerFooterCommand(FOOTER_COMMAND);
-  registerFooterCommand(OPENAI_FOOTER_COMMAND);
   registerOpenAIImage(pi, config);
 
   function installFooter(ctx: ExtensionContext): void {
