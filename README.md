@@ -4,34 +4,16 @@ A pi extension for OpenAI subscription workflows: fast mode, usage visibility, f
 
 ## Install
 
-Install from a local checkout:
+Install from GitHub:
 
 ```bash
-pi install /path/to/pi-better-openai
+pi install github:mattleong/pi-better-openai
 ```
 
-For a project-local install instead of a global install, add `-l`:
+Or install from npm:
 
 ```bash
-pi install -l /path/to/pi-better-openai
-```
-
-Reload pi after installing:
-
-```text
-/reload
-```
-
-Sign in to OpenAI Codex subscription auth if you want usage stats or image generation:
-
-```text
-/login openai-codex
-```
-
-Start pi with fast mode enabled:
-
-```bash
-pi --fast
+pi install npm:pi-better-openai
 ```
 
 ## Features
