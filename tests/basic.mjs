@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
-import { _test } from "../extensions/pi-better-openai.ts";
-import { truncateToWidth } from "../extensions/format.ts";
-import { isRecord, readRawConfig, writeConfig } from "../extensions/config.ts";
+import { _test } from "../index.ts";
+import { truncateToWidth } from "../src/format.ts";
+import { isRecord, readRawConfig, writeConfig } from "../src/config.ts";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";

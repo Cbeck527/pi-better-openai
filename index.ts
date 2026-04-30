@@ -5,8 +5,8 @@
  * enabled and the selected model is in the configured allow-list.
  */
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
-import { CONFIG_BASENAME, STATUS_KEY } from "./identity.ts";
-import { formatTokens, sanitizeStatusText, truncateToWidth, visibleWidth } from "./format.ts";
+import { CONFIG_BASENAME, STATUS_KEY } from "./src/identity.ts";
+import { formatTokens, sanitizeStatusText, truncateToWidth, visibleWidth } from "./src/format.ts";
 import {
   DEFAULT_CONFIG,
   DEFAULT_IMAGE_CONFIG,
@@ -25,7 +25,7 @@ import {
   readRawConfig,
   resolveConfig,
   writeConfig
-} from "./config.ts";
+} from "./src/config.ts";
 import {
   AUTH_FILE,
   type UsageSnapshot,
@@ -35,8 +35,8 @@ import {
   parseUsageSnapshot,
   readCodexAuth,
   requestCodexUsage
-} from "./usage.ts";
-import { registerOpenAIImage, _imageTest } from "./image.ts";
+} from "./src/usage.ts";
+import { registerOpenAIImage, _imageTest } from "./src/image.ts";
 
 const COMMAND = "fast";
 const OPENAI_STATUS_COMMAND = "openai-usage";
