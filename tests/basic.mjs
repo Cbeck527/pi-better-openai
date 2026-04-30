@@ -24,6 +24,8 @@ assert.equal(_test.formatPercent(99.4), "99%");
 assert.equal(_test.formatPercent(null), "--");
 assert.equal(_test.imageTest.OPENAI_IMAGE_TOOL, "openai_image");
 assert.equal(_test.imageTest.imageMimeType("x.jpg"), "image/jpeg");
+assert.equal(_test.imageTest.displayPath(join(process.env.HOME, "dev", "image.png")), "~/dev/image.png");
+assert.equal(_test.imageTest.latestUserPromptFromEntries([{ type: "message", message: { role: "user", content: "draw a dog" } }]), "draw a dog");
 assert.deepEqual(_test.imageTest.dataUrlParts("data:image/png;base64,Zm9v", "image/png"), { data: "Zm9v", mimeType: "image/png" });
 assert.equal(_test.imageTest.extractImageFromEvent({ type: "response.output_item.done", item: { type: "image_generation_call", id: "ig_1", status: "completed", result: "Zm9v" } }, "image/png").data, "Zm9v");
 assert.deepEqual(_test.imageTest.buildRequest({ prompt: "draw an otter" }, "gpt-5.5", { image: _test.DEFAULT_IMAGE_CONFIG }, []).tool_choice, { type: "image_generation" });

@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { extname, isAbsolute, join, resolve } from "node:path";
+import { extname, isAbsolute, join, resolve, sep } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import type { ResolvedConfig } from "./config.ts";
 import { isRecord } from "./config.ts";
@@ -23,7 +23,7 @@ export type ImageOutputFormat = typeof IMAGE_OUTPUT_FORMATS[number];
 const TOOL_PARAMS = {
   type: "object",
   properties: {
-    prompt: { type: "string", description: "Image generation/editing prompt." },
+    prompt: { type: "string", description: "Image generation/editing prompt. Pass the user's wording verbatim unless they explicitly ask you to refine or expand it." },
     action: { type: "string", enum: IMAGE_ACTIONS, description: "Whether to generate a new image, edit/reference provided images, or let the model decide." },
     images: {
       type: "array",
@@ -338,6 +338,39 @@ async function requestCodexImage(params: ToolParams, ctx: ExtensionContext, cfg:
   return { ...parsed, prompt: params.prompt, savedPath, model, action, outputFormat };
 }
 
+function displayPath(path: string): string {
+  const home = homedir();
+  if (!home) return path;
+  if (path === home) return "~";
+  const homePrefix = home.endsWith(sep) ? home : `${home}${sep}`;
+  return path.startsWith(homePrefix) ? `~/${path.slice(homePrefix.length)}` : path;
+}
+
+function textFromMessageContent(content: unknown): string | undefined {
+  if (typeof content === "string") return content.trim() || undefined;
+  if (!Array.isArray(content)) return undefined;
+  const text = content
+    .filter((part) => isRecord(part) && part.type === "text" && typeof part.text === "string")
+    .map((part) => (part as { text: string }).text)
+    .join("\n")
+    .trim();
+  return text || undefined;
+}
+
+function latestUserPromptFromEntries(entries: unknown[]): string | undefined {
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const entry = entries[i];
+    if (!isRecord(entry) || entry.type !== "message" || !isRecord(entry.message) || entry.message.role !== "user") continue;
+    const text = textFromMessageContent(entry.message.content);
+    if (text) return text;
+  }
+  return undefined;
+}
+
+function resolveToolPrompt(params: ToolParams, ctx: ExtensionContext): string {
+  return latestUserPromptFromEntries(ctx.sessionManager.getEntries()) ?? params.prompt;
+}
+
 function resultText(result: CodexImageResult): string {
   const parts = [
     `Generated image via openai-codex/${result.model}.`,
@@ -345,7 +378,7 @@ function resultText(result: CodexImageResult): string {
     `Prompt: ${result.prompt}`
   ];
   if (result.revisedPrompt) parts.push(`Revised prompt: ${result.revisedPrompt}`);
-  if (result.savedPath) parts.push(`Saved: ${result.savedPath}`);
+  if (result.savedPath) parts.push(`Saved: ${displayPath(result.savedPath)}`);
   return parts.join("\n");
 }
 
@@ -388,6 +421,35 @@ export function registerOpenAIImage(pi: ExtensionAPI, getConfig: (ctx: Extension
     };
   }
 
+  void import("@mariozechner/pi-tui").then(({ Box, Container, Image, Text }) => {
+    pi.registerMessageRenderer<CodexImageResult>("openai-image", (message, _options, theme) => {
+      const result = message.details;
+      const text = result && isRecord(result)
+        ? resultText(result as CodexImageResult)
+        : typeof message.content === "string"
+          ? message.content
+          : message.content.filter((part) => part.type === "text").map((part) => part.text).join("\n");
+      const image = result && isRecord(result) && typeof result.data === "string" && typeof result.mimeType === "string"
+        ? { data: result.data, mimeType: result.mimeType, savedPath: typeof result.savedPath === "string" ? result.savedPath : undefined }
+        : Array.isArray(message.content)
+          ? message.content.find((part) => part.type === "image" && typeof part.data === "string" && typeof part.mimeType === "string")
+          : undefined;
+
+      const container = new Container();
+      const box = new Box(1, 1, (line) => theme.bg("customMessageBg", line));
+      box.addChild(new Text(`${theme.fg("accent", theme.bold("[openai-image]"))}\n\n${text}`, 0, 0));
+      if (image) {
+        box.addChild(new Image(image.data, image.mimeType, { fallbackColor: (line) => theme.fg("dim", line) }, {
+          maxWidthCells: 80,
+          maxHeightCells: 24,
+          filename: "savedPath" in image && typeof image.savedPath === "string" ? image.savedPath : undefined
+        }));
+      }
+      container.addChild(box);
+      return container;
+    });
+  }).catch(() => undefined);
+
   pi.registerCommand(OPENAI_IMAGE_COMMAND, {
     description: "Generate an image with OpenAI Codex image generation",
     handler: async (args, ctx) => {
@@ -417,14 +479,16 @@ export function registerOpenAIImage(pi: ExtensionAPI, getConfig: (ctx: Extension
     promptSnippet: "Generate or edit raster images via OpenAI Codex subscription auth.",
     promptGuidelines: [
       "Use openai_image when the user asks to generate or edit a raster image, photo, illustration, mockup, texture, sprite, or bitmap asset.",
+      "Pass the user's image prompt verbatim. Do not embellish, rewrite, add camera/style details, or add negative prompt terms unless the user explicitly asks you to refine the prompt.",
       "Use openai_image with images for local reference images or edit targets; save project assets into the workspace when requested."
     ],
     parameters: TOOL_PARAMS,
     async execute(_toolCallId, params: ToolParams, signal, onUpdate, ctx) {
       const cfg = getConfig(ctx);
       const model = resolveModel(params, ctx, cfg);
+      const requestParams = { ...params, prompt: resolveToolPrompt(params, ctx) };
       onUpdate?.({ content: [{ type: "text", text: `Requesting OpenAI image via openai-codex/${model}...` }] });
-      const result = await generate(params, ctx, signal);
+      const result = await generate(requestParams, ctx, signal);
       return {
         content: [
           { type: "text", text: resultText(result) },
@@ -447,5 +511,7 @@ export const _imageTest = {
   imageMimeType,
   dataUrlParts,
   extractImageFromEvent,
+  displayPath,
+  latestUserPromptFromEntries,
   buildRequest
 };
