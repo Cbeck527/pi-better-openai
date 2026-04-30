@@ -43,7 +43,6 @@ const OPENAI_STATUS_COMMAND = "openai-usage";
 const OPENAI_SETTINGS_COMMAND = "openai-settings";
 const FLAG = "fast";
 const SERVICE_TIER = "priority";
-const COMMAND_ARGS = ["models"] as const;
 const SETTINGS_COMMAND_ARGS = ["path", "print", "debug"] as const;
 
 type SettingsPickerItem = {
@@ -262,18 +261,10 @@ export default function betterOpenAI(pi: ExtensionAPI): void {
 
   pi.registerCommand(COMMAND, {
     description: "Toggle OpenAI fast mode",
-    getArgumentCompletions: (prefix) => {
-      const items = COMMAND_ARGS.filter((arg) => arg.startsWith(prefix)).map((arg) => ({ value: arg, label: arg }));
-      return items.length ? items : null;
-    },
     handler: async (args, ctx) => {
       const arg = args.trim().toLowerCase();
       if (!arg) return setActive(ctx, !desiredActive);
-      if (arg === "models") {
-        ctx.ui.notify(`Fast-mode supported models: ${modelList(refresh(ctx).supportedModels)}.`, "info");
-        return;
-      }
-      ctx.ui.notify("Usage: /fast [models]", "error");
+      ctx.ui.notify("Usage: /fast", "error");
     }
   });
 
@@ -286,7 +277,7 @@ export default function betterOpenAI(pi: ExtensionAPI): void {
 
   function buildSettingsItems(cfg: ResolvedConfig): SettingsPickerItem[] {
     return [
-      { id: "fast.enabled", label: "Fast mode", currentValue: String(desiredActive), values: ["true", "false"], description: "Request OpenAI fast mode. It activates when the current model is in the supported model list." },
+      { id: "fast.enabled", label: "Fast mode", currentValue: String(desiredActive), values: ["true", "false"], description: `Request OpenAI fast mode. Activates for supported models: ${modelList(cfg.supportedModels)}.` },
       { id: "persistState", label: "Persist fast state", currentValue: String(cfg.persistState), values: ["true", "false"], description: "Remember fast-mode state across sessions." },
       { id: "footer.mode", label: "Footer mode", currentValue: cfg.footer.mode, values: [...FOOTER_MODES], description: "replace = custom footer, status = pi footer plus status line, off = no Better OpenAI footer/status." },
       { id: "usage.enabled", label: "Usage display", currentValue: String(cfg.usage.enabled), values: ["true", "false"], description: "Fetch and display OpenAI subscription usage windows." },

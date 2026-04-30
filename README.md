@@ -37,9 +37,8 @@ pi --fast
 Commands:
 
 - `/fast` toggles fast mode.
-- `/fast models` lists configured models.
 - `/openai-usage` shows current OpenAI subscription usage.
-- `/openai-settings` opens an interactive settings picker for fast mode, footer, usage, image, and persistence options.
+- `/openai-settings` opens an interactive settings picker for fast mode, supported models, footer, usage, image, and persistence options.
 - `/openai-settings debug` shows injected service tier, last injection time, config path, and footer/usage settings.
 - `/openai-settings path` and `/openai-settings print` show config locations or contents.
 
