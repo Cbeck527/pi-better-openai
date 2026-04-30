@@ -16,27 +16,48 @@ export const IMAGE_SAVE_MODES = ["none", "project", "global", "custom"] as const
 export const IMAGE_ACTIONS = ["auto", "generate", "edit"] as const;
 export const IMAGE_OUTPUT_FORMATS = ["png", "jpeg", "webp"] as const;
 
-export type ImageSaveMode = typeof IMAGE_SAVE_MODES[number];
-export type ImageAction = typeof IMAGE_ACTIONS[number];
-export type ImageOutputFormat = typeof IMAGE_OUTPUT_FORMATS[number];
+export type ImageSaveMode = (typeof IMAGE_SAVE_MODES)[number];
+export type ImageAction = (typeof IMAGE_ACTIONS)[number];
+export type ImageOutputFormat = (typeof IMAGE_OUTPUT_FORMATS)[number];
 
 const TOOL_PARAMS = {
   type: "object",
   properties: {
-    prompt: { type: "string", description: "Image generation/editing prompt. Pass the user's wording verbatim unless they explicitly ask you to refine or expand it." },
-    action: { type: "string", enum: IMAGE_ACTIONS, description: "Whether to generate a new image, edit/reference provided images, or let the model decide." },
+    prompt: {
+      type: "string",
+      description:
+        "Image generation/editing prompt. Pass the user's wording verbatim unless they explicitly ask you to refine or expand it.",
+    },
+    action: {
+      type: "string",
+      enum: IMAGE_ACTIONS,
+      description:
+        "Whether to generate a new image, edit/reference provided images, or let the model decide.",
+    },
     images: {
       type: "array",
       items: { type: "string" },
-      description: "Local image paths to use as edit targets or references."
+      description: "Local image paths to use as edit targets or references.",
     },
-    model: { type: "string", description: "OpenAI Codex model to drive the hosted image_generation tool. Defaults to current openai-codex model or config default." },
-    outputFormat: { type: "string", enum: IMAGE_OUTPUT_FORMATS, description: "Generated image format." },
-    save: { type: "string", enum: IMAGE_SAVE_MODES, description: "Where to save the generated image." },
-    saveDir: { type: "string", description: "Directory to save image when save=custom." }
+    model: {
+      type: "string",
+      description:
+        "OpenAI Codex model to drive the hosted image_generation tool. Defaults to current openai-codex model or config default.",
+    },
+    outputFormat: {
+      type: "string",
+      enum: IMAGE_OUTPUT_FORMATS,
+      description: "Generated image format.",
+    },
+    save: {
+      type: "string",
+      enum: IMAGE_SAVE_MODES,
+      description: "Where to save the generated image.",
+    },
+    saveDir: { type: "string", description: "Directory to save image when save=custom." },
   },
   required: ["prompt"],
-  additionalProperties: false
+  additionalProperties: false,
 } as const;
 
 type ToolParams = {
@@ -74,7 +95,10 @@ export type CodexImageResult = {
   outputFormat: ImageOutputFormat;
 };
 
-type ExtractedImageResult = Omit<CodexImageResult, "prompt" | "savedPath" | "model" | "action" | "outputFormat">;
+type ExtractedImageResult = Omit<
+  CodexImageResult,
+  "prompt" | "savedPath" | "model" | "action" | "outputFormat"
+>;
 
 export type ImageGenerationDebug = {
   authFound: boolean;
@@ -90,7 +114,7 @@ export type ImageGenerationDebug = {
 
 function decodeBase64Url(value: string): string {
   const normalized = value.replace(/-/g, "+").replace(/_/g, "/");
-  const padded = normalized + "=".repeat((4 - normalized.length % 4) % 4);
+  const padded = normalized + "=".repeat((4 - (normalized.length % 4)) % 4);
   return Buffer.from(padded, "base64").toString("utf8");
 }
 
@@ -109,15 +133,28 @@ export function extractAccountIdFromJwt(token: string): string | undefined {
   }
 }
 
-function parseRegistryCredentials(raw: string | undefined): Omit<CodexImageCredentials, "source"> | undefined {
+function parseRegistryCredentials(
+  raw: string | undefined,
+): Omit<CodexImageCredentials, "source"> | undefined {
   const value = raw?.trim();
   if (!value) return undefined;
   try {
     const parsed = JSON.parse(value) as unknown;
     if (isRecord(parsed)) {
-      const accessToken = typeof parsed.access === "string" ? parsed.access : typeof parsed.token === "string" ? parsed.token : undefined;
-      const accountId = typeof parsed.accountId === "string" ? parsed.accountId : typeof parsed.account_id === "string" ? parsed.account_id : undefined;
-      if (accessToken?.trim() && accountId?.trim()) return { accessToken: accessToken.trim(), accountId: accountId.trim() };
+      const accessToken =
+        typeof parsed.access === "string"
+          ? parsed.access
+          : typeof parsed.token === "string"
+            ? parsed.token
+            : undefined;
+      const accountId =
+        typeof parsed.accountId === "string"
+          ? parsed.accountId
+          : typeof parsed.account_id === "string"
+            ? parsed.account_id
+            : undefined;
+      if (accessToken?.trim() && accountId?.trim())
+        return { accessToken: accessToken.trim(), accountId: accountId.trim() };
     }
   } catch {
     // Plain bearer token is expected for openai-codex in pi.
@@ -127,7 +164,9 @@ function parseRegistryCredentials(raw: string | undefined): Omit<CodexImageCrede
 }
 
 async function getCredentials(ctx: ExtensionContext): Promise<CodexImageCredentials> {
-  const registryToken = await ctx.modelRegistry.getApiKeyForProvider("openai-codex").catch(() => undefined);
+  const registryToken = await ctx.modelRegistry
+    .getApiKeyForProvider("openai-codex")
+    .catch(() => undefined);
   const registryCredentials = parseRegistryCredentials(registryToken);
   if (registryCredentials) return { ...registryCredentials, source: "modelRegistry" };
   const auth = readCodexAuth();
@@ -135,7 +174,11 @@ async function getCredentials(ctx: ExtensionContext): Promise<CodexImageCredenti
   throw new Error("Missing openai-codex OAuth credentials. Run /login openai-codex.");
 }
 
-function resolveModel(params: Pick<ToolParams, "model">, ctx: ExtensionContext, cfg: ResolvedConfig): string {
+function resolveModel(
+  params: Pick<ToolParams, "model">,
+  ctx: ExtensionContext,
+  cfg: ResolvedConfig,
+): string {
   const model = params.model?.trim();
   if (model) return model.includes("/") ? model.split("/").pop() || model : model;
   if (ctx.model?.provider === "openai-codex") return ctx.model.id;
@@ -175,16 +218,29 @@ async function readImageInputs(paths: string[] | undefined, cwd: string): Promis
   return inputs;
 }
 
-function resolveSaveDir(mode: ImageSaveMode, params: Pick<ToolParams, "saveDir">, cwd: string): string | undefined {
+function resolveSaveDir(
+  mode: ImageSaveMode,
+  params: Pick<ToolParams, "saveDir">,
+  cwd: string,
+): string | undefined {
   if (mode === "none") return undefined;
   if (mode === "project") return join(cwd, ".pi", "generated-images");
-  if (mode === "global") return join(process.env.PI_CODING_AGENT_DIR?.trim() || join(homedir(), ".pi", "agent"), "generated-images");
+  if (mode === "global")
+    return join(
+      process.env.PI_CODING_AGENT_DIR?.trim() || join(homedir(), ".pi", "agent"),
+      "generated-images",
+    );
   const dir = params.saveDir?.trim() || process.env.PI_IMAGE_SAVE_DIR?.trim();
   if (!dir) throw new Error("save=custom requires saveDir or PI_IMAGE_SAVE_DIR.");
   return dir;
 }
 
-async function saveImage(data: string, format: ImageOutputFormat, outputDir: string, id: string): Promise<string> {
+async function saveImage(
+  data: string,
+  format: ImageOutputFormat,
+  outputDir: string,
+  id: string,
+): Promise<string> {
   const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
   const safeId = id.replace(/[^a-zA-Z0-9_-]/g, "_") || randomUUID().slice(0, 8);
   const path = join(outputDir, `openai-image-${timestamp}-${safeId}.${extensionForFormat(format)}`);
@@ -193,11 +249,20 @@ async function saveImage(data: string, format: ImageOutputFormat, outputDir: str
   return path;
 }
 
-function buildRequest(params: ToolParams, model: string, cfg: ResolvedConfig, images: ImageInput[]) {
+function buildRequest(
+  params: ToolParams,
+  model: string,
+  cfg: ResolvedConfig,
+  images: ImageInput[],
+) {
   const { action, outputFormat } = resolveImageConfig(cfg, params);
   const content: Array<Record<string, unknown>> = [{ type: "input_text", text: params.prompt }];
   for (const image of images) {
-    content.push({ type: "input_image", detail: "auto", image_url: `data:${image.mimeType};base64,${image.data}` });
+    content.push({
+      type: "input_image",
+      detail: "auto",
+      image_url: `data:${image.mimeType};base64,${image.data}`,
+    });
   }
   const tool: Record<string, unknown> = { type: "image_generation", output_format: outputFormat };
   if (action !== "auto") tool.action = action;
@@ -211,7 +276,7 @@ function buildRequest(params: ToolParams, model: string, cfg: ResolvedConfig, im
     store: false,
     stream: true,
     include: [],
-    client_metadata: { "x-codex-installation-id": "pi-better-openai" }
+    client_metadata: { "x-codex-installation-id": "pi-better-openai" },
   };
 }
 
@@ -221,20 +286,45 @@ function dataUrlParts(value: string, fallbackMimeType: string): { data: string; 
   return { data: value.trim(), mimeType: fallbackMimeType };
 }
 
-function asImageResultItem(value: unknown): { id?: string; status?: string; revised_prompt?: string; result?: string; b64_json?: string } | undefined {
+function asImageResultItem(
+  value: unknown,
+):
+  | { id?: string; status?: string; revised_prompt?: string; result?: string; b64_json?: string }
+  | undefined {
   if (!isRecord(value) || value.type !== "image_generation_call") return undefined;
-  return value as { id?: string; status?: string; revised_prompt?: string; result?: string; b64_json?: string };
+  return value as {
+    id?: string;
+    status?: string;
+    revised_prompt?: string;
+    result?: string;
+    b64_json?: string;
+  };
 }
 
-function isImageContent(value: unknown): value is { type: "image"; data: string; mimeType: string } {
-  return isRecord(value) && value.type === "image" && typeof value.data === "string" && typeof value.mimeType === "string";
+function isImageContent(
+  value: unknown,
+): value is { type: "image"; data: string; mimeType: string } {
+  return (
+    isRecord(value) &&
+    value.type === "image" &&
+    typeof value.data === "string" &&
+    typeof value.mimeType === "string"
+  );
 }
 
-function extractImageFromEvent(event: unknown, fallbackMimeType: string): ExtractedImageResult | undefined {
+function extractImageFromEvent(
+  event: unknown,
+  fallbackMimeType: string,
+): ExtractedImageResult | undefined {
   if (!isRecord(event)) return undefined;
   const item = asImageResultItem(event.item) ?? asImageResultItem(event);
   if (item) {
-    const raw = typeof item.result === "string" && item.result.trim() ? item.result : typeof item.b64_json === "string" ? item.b64_json : undefined;
+    const raw =
+      typeof item.result === "string" && item.result.trim()
+        ? item.result
+        : typeof item.b64_json === "string"
+          ? item.b64_json
+          : undefined;
     if (!raw) return undefined;
     const { data, mimeType } = dataUrlParts(raw, fallbackMimeType);
     return {
@@ -242,7 +332,7 @@ function extractImageFromEvent(event: unknown, fallbackMimeType: string): Extrac
       status: typeof item.status === "string" ? item.status : "completed",
       revisedPrompt: typeof item.revised_prompt === "string" ? item.revised_prompt : undefined,
       data,
-      mimeType
+      mimeType,
     };
   }
   const partial = event.partial_image_b64 ?? event.b64_json;
@@ -253,7 +343,11 @@ function extractImageFromEvent(event: unknown, fallbackMimeType: string): Extrac
   return undefined;
 }
 
-async function parseSseForImage(response: Response, fallbackMimeType: string, signal?: AbortSignal): Promise<ExtractedImageResult> {
+async function parseSseForImage(
+  response: Response,
+  fallbackMimeType: string,
+  signal?: AbortSignal,
+): Promise<ExtractedImageResult> {
   if (!response.body) throw new Error("No response body from Codex image request.");
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
@@ -291,12 +385,17 @@ async function parseSseForImage(response: Response, fallbackMimeType: string, si
             }
           }
           if (isRecord(event) && event.type === "response.failed") {
-            const error = isRecord(event.response) && isRecord(event.response.error) ? event.response.error : undefined;
-            const message = typeof error?.message === "string" ? error.message : "Codex image request failed.";
+            const error =
+              isRecord(event.response) && isRecord(event.response.error)
+                ? event.response.error
+                : undefined;
+            const message =
+              typeof error?.message === "string" ? error.message : "Codex image request failed.";
             throw new Error(message);
           }
           if (isRecord(event) && event.type === "error") {
-            const message = typeof event.message === "string" ? event.message : JSON.stringify(event);
+            const message =
+              typeof event.message === "string" ? event.message : JSON.stringify(event);
             throw new Error(`Codex image error: ${message}`);
           }
         }
@@ -310,7 +409,12 @@ async function parseSseForImage(response: Response, fallbackMimeType: string, si
   throw new Error("No image_generation_call result returned by Codex.");
 }
 
-async function requestCodexImage(params: ToolParams, ctx: ExtensionContext, cfg: ResolvedConfig, requestSignal?: AbortSignal): Promise<CodexImageResult> {
+async function requestCodexImage(
+  params: ToolParams,
+  ctx: ExtensionContext,
+  cfg: ResolvedConfig,
+  requestSignal?: AbortSignal,
+): Promise<CodexImageResult> {
   if (!cfg.image.enabled) throw new Error("OpenAI image generation is disabled in config.");
   const credentials = await getCredentials(ctx);
   const model = resolveModel(params, ctx, cfg);
@@ -329,18 +433,26 @@ async function requestCodexImage(params: ToolParams, ctx: ExtensionContext, cfg:
       accept: "text/event-stream",
       "content-type": "application/json",
       originator: "codex_cli_rs",
-      "User-Agent": "codex_cli_rs/0.0.0 (pi-better-openai)"
+      "User-Agent": "codex_cli_rs/0.0.0 (pi-better-openai)",
     },
     body: JSON.stringify(request),
-    signal
+    signal,
   });
   if (!response.ok) {
     const text = await response.text().catch(() => "");
-    throw new Error(`Codex image request failed (${response.status}): ${text || response.statusText}`);
+    throw new Error(
+      `Codex image request failed (${response.status}): ${text || response.statusText}`,
+    );
   }
-  const parsed = await parseSseForImage(response, imageMimeType(`image.${outputFormat}`, outputFormat), signal);
+  const parsed = await parseSseForImage(
+    response,
+    imageMimeType(`image.${outputFormat}`, outputFormat),
+    signal,
+  );
   const saveDir = resolveSaveDir(save, params, ctx.cwd || process.cwd());
-  const savedPath = saveDir ? await saveImage(parsed.data, outputFormat, saveDir, parsed.id) : undefined;
+  const savedPath = saveDir
+    ? await saveImage(parsed.data, outputFormat, saveDir, parsed.id)
+    : undefined;
   return { ...parsed, prompt: params.prompt, savedPath, model, action, outputFormat };
 }
 
@@ -366,7 +478,13 @@ function textFromMessageContent(content: unknown): string | undefined {
 function latestUserPromptFromEntries(entries: unknown[]): string | undefined {
   for (let i = entries.length - 1; i >= 0; i--) {
     const entry = entries[i];
-    if (!isRecord(entry) || entry.type !== "message" || !isRecord(entry.message) || entry.message.role !== "user") continue;
+    if (
+      !isRecord(entry) ||
+      entry.type !== "message" ||
+      !isRecord(entry.message) ||
+      entry.message.role !== "user"
+    )
+      continue;
     const text = textFromMessageContent(entry.message.content);
     if (text) return text;
   }
@@ -381,18 +499,25 @@ function resultText(result: CodexImageResult): string {
   const parts = [
     `Generated image via openai-codex/${result.model}.`,
     `Action: ${result.action}.`,
-    `Prompt: ${result.prompt}`
+    `Prompt: ${result.prompt}`,
   ];
   if (result.revisedPrompt) parts.push(`Revised prompt: ${result.revisedPrompt}`);
   if (result.savedPath) parts.push(`Saved: ${displayPath(result.savedPath)}`);
   return parts.join("\n");
 }
 
-export function registerOpenAIImage(pi: ExtensionAPI, getConfig: (ctx: ExtensionContext) => ResolvedConfig): { getDebug: (ctx: ExtensionContext) => Promise<ImageGenerationDebug> } {
+export function registerOpenAIImage(
+  pi: ExtensionAPI,
+  getConfig: (ctx: ExtensionContext) => ResolvedConfig,
+): { getDebug: (ctx: ExtensionContext) => Promise<ImageGenerationDebug> } {
   let lastStatus: string | undefined;
   let lastError: string | undefined;
 
-  async function generate(params: ToolParams, ctx: ExtensionContext, requestSignal?: AbortSignal): Promise<CodexImageResult> {
+  async function generate(
+    params: ToolParams,
+    ctx: ExtensionContext,
+    requestSignal?: AbortSignal,
+  ): Promise<CodexImageResult> {
     try {
       lastStatus = "requesting";
       lastError = undefined;
@@ -423,40 +548,67 @@ export function registerOpenAIImage(pi: ExtensionAPI, getConfig: (ctx: Extension
       defaultSave: cfg.image.defaultSave,
       enabled: cfg.image.enabled,
       lastStatus,
-      lastError
+      lastError,
     };
   }
 
-  void import("@mariozechner/pi-tui").then(({ Box, Container, Image, Text }) => {
-    pi.registerMessageRenderer<CodexImageResult>("openai-image", (message, _options, theme) => {
-      const result = message.details;
-      const text = result && isRecord(result)
-        ? resultText(result as CodexImageResult)
-        : typeof message.content === "string"
-          ? message.content
-          : message.content.filter((part) => part.type === "text").map((part) => part.text).join("\n");
-      let image: { data: string; mimeType: string; savedPath?: string } | undefined;
-      if (result && isRecord(result) && typeof result.data === "string" && typeof result.mimeType === "string") {
-        image = { data: result.data, mimeType: result.mimeType, savedPath: typeof result.savedPath === "string" ? result.savedPath : undefined };
-      } else if (Array.isArray(message.content)) {
-        const imagePart = message.content.find(isImageContent);
-        if (imagePart) image = { data: imagePart.data, mimeType: imagePart.mimeType };
-      }
+  void import("@mariozechner/pi-tui")
+    .then(({ Box, Container, Image, Text }) => {
+      pi.registerMessageRenderer<CodexImageResult>("openai-image", (message, _options, theme) => {
+        const result = message.details;
+        const text =
+          result && isRecord(result)
+            ? resultText(result as CodexImageResult)
+            : typeof message.content === "string"
+              ? message.content
+              : message.content
+                  .filter((part) => part.type === "text")
+                  .map((part) => part.text)
+                  .join("\n");
+        let image: { data: string; mimeType: string; savedPath?: string } | undefined;
+        if (
+          result &&
+          isRecord(result) &&
+          typeof result.data === "string" &&
+          typeof result.mimeType === "string"
+        ) {
+          image = {
+            data: result.data,
+            mimeType: result.mimeType,
+            savedPath: typeof result.savedPath === "string" ? result.savedPath : undefined,
+          };
+        } else if (Array.isArray(message.content)) {
+          const imagePart = message.content.find(isImageContent);
+          if (imagePart) image = { data: imagePart.data, mimeType: imagePart.mimeType };
+        }
 
-      const container = new Container();
-      const box = new Box(1, 1, (line) => theme.bg("customMessageBg", line));
-      box.addChild(new Text(`${theme.fg("accent", theme.bold("[openai-image]"))}\n\n${text}`, 0, 0));
-      if (image) {
-        box.addChild(new Image(image.data, image.mimeType, { fallbackColor: (line) => theme.fg("dim", line) }, {
-          maxWidthCells: 80,
-          maxHeightCells: 24,
-          filename: "savedPath" in image && typeof image.savedPath === "string" ? image.savedPath : undefined
-        }));
-      }
-      container.addChild(box);
-      return container;
-    });
-  }).catch(() => undefined);
+        const container = new Container();
+        const box = new Box(1, 1, (line) => theme.bg("customMessageBg", line));
+        box.addChild(
+          new Text(`${theme.fg("accent", theme.bold("[openai-image]"))}\n\n${text}`, 0, 0),
+        );
+        if (image) {
+          box.addChild(
+            new Image(
+              image.data,
+              image.mimeType,
+              { fallbackColor: (line) => theme.fg("dim", line) },
+              {
+                maxWidthCells: 80,
+                maxHeightCells: 24,
+                filename:
+                  "savedPath" in image && typeof image.savedPath === "string"
+                    ? image.savedPath
+                    : undefined,
+              },
+            ),
+          );
+        }
+        container.addChild(box);
+        return container;
+      });
+    })
+    .catch(() => undefined);
 
   pi.registerCommand(OPENAI_IMAGE_COMMAND, {
     description: "Generate an image with OpenAI Codex image generation",
@@ -472,39 +624,43 @@ export function registerOpenAIImage(pi: ExtensionAPI, getConfig: (ctx: Extension
         customType: "openai-image",
         content: [
           { type: "text", text: resultText(result) },
-          { type: "image", data: result.data, mimeType: result.mimeType }
+          { type: "image", data: result.data, mimeType: result.mimeType },
         ],
         display: true,
-        details: result
+        details: result,
       });
-    }
+    },
   });
 
   pi.registerTool({
     name: OPENAI_IMAGE_TOOL,
     label: "OpenAI image",
-    description: "Generate or edit images through OpenAI Codex subscription auth using the hosted image_generation tool. Supports local reference/edit images and saves to the project by default.",
+    description:
+      "Generate or edit images through OpenAI Codex subscription auth using the hosted image_generation tool. Supports local reference/edit images and saves to the project by default.",
     promptSnippet: "Generate or edit raster images via OpenAI Codex subscription auth.",
     promptGuidelines: [
       "Use openai_image when the user asks to generate or edit a raster image, photo, illustration, mockup, texture, sprite, or bitmap asset.",
       "Pass the user's image prompt verbatim. Do not embellish, rewrite, add camera/style details, or add negative prompt terms unless the user explicitly asks you to refine the prompt.",
-      "Use openai_image with images for local reference images or edit targets; save project assets into the workspace when requested."
+      "Use openai_image with images for local reference images or edit targets; save project assets into the workspace when requested.",
     ],
     parameters: TOOL_PARAMS,
     async execute(_toolCallId, params: ToolParams, signal, onUpdate, ctx) {
       const cfg = getConfig(ctx);
       const model = resolveModel(params, ctx, cfg);
       const requestParams = { ...params, prompt: resolveToolPrompt(params, ctx) };
-      onUpdate?.({ content: [{ type: "text", text: `Requesting OpenAI image via openai-codex/${model}...` }], details: undefined });
+      onUpdate?.({
+        content: [{ type: "text", text: `Requesting OpenAI image via openai-codex/${model}...` }],
+        details: undefined,
+      });
       const result = await generate(requestParams, ctx, signal);
       return {
         content: [
           { type: "text", text: resultText(result) },
-          { type: "image", data: result.data, mimeType: result.mimeType }
+          { type: "image", data: result.data, mimeType: result.mimeType },
         ],
-        details: result
+        details: result,
       };
-    }
+    },
   });
 
   return { getDebug };
@@ -521,5 +677,5 @@ export const _imageTest = {
   extractImageFromEvent,
   displayPath,
   latestUserPromptFromEntries,
-  buildRequest
+  buildRequest,
 };

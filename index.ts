@@ -15,7 +15,6 @@ import {
   IMAGE_OUTPUT_FORMATS,
   IMAGE_SAVE_MODES,
   configPaths,
-  type FooterMode,
   type ResolvedConfig,
   type SupportedModel,
   isRecord,
@@ -24,7 +23,7 @@ import {
   parseModels,
   readRawConfig,
   resolveConfig,
-  writeConfig
+  writeConfig,
 } from "./src/config.ts";
 import {
   AUTH_FILE,
@@ -34,7 +33,7 @@ import {
   formatUsageSnapshot,
   parseUsageSnapshot,
   readCodexAuth,
-  requestCodexUsage
+  requestCodexUsage,
 } from "./src/usage.ts";
 import { registerOpenAIImage, _imageTest } from "./src/image.ts";
 
@@ -49,7 +48,10 @@ type SettingsPickerItem = {
   description?: string;
   currentValue: string;
   values?: string[];
-  submenu?: (currentValue: string, done: (selectedValue?: string) => void) => { render(width: number): string[]; invalidate(): void; handleInput?(data: string): void };
+  submenu?: (
+    currentValue: string,
+    done: (selectedValue?: string) => void,
+  ) => { render(width: number): string[]; invalidate(): void; handleInput?(data: string): void };
 };
 
 function currentModelKey(ctx: ExtensionContext): string {
@@ -59,7 +61,9 @@ function currentModelKey(ctx: ExtensionContext): string {
 function supportsFast(ctx: ExtensionContext, supportedModels: SupportedModel[]): boolean {
   const current = ctx.model;
   if (!current) return false;
-  return supportedModels.some((model) => model.provider === current.provider && model.id === current.id);
+  return supportedModels.some(
+    (model) => model.provider === current.provider && model.id === current.id,
+  );
 }
 
 function modelList(supportedModels: SupportedModel[]): string {
@@ -68,7 +72,12 @@ function modelList(supportedModels: SupportedModel[]): string {
     : "none configured";
 }
 
-function stateText(ctx: ExtensionContext, desiredActive: boolean, active: boolean, supportedModels: SupportedModel[]): string {
+function stateText(
+  ctx: ExtensionContext,
+  desiredActive: boolean,
+  active: boolean,
+  supportedModels: SupportedModel[],
+): string {
   const model = currentModelKey(ctx);
   if (active) return `Fast mode is on for ${model}.`;
   if (desiredActive) {
@@ -78,7 +87,8 @@ function stateText(ctx: ExtensionContext, desiredActive: boolean, active: boolea
 }
 
 function isOpenAISubscriptionModel(ctx: ExtensionContext, cfg: ResolvedConfig): boolean {
-  if (!ctx.model || (ctx.model.provider !== "openai" && ctx.model.provider !== "openai-codex")) return false;
+  if (!ctx.model || (ctx.model.provider !== "openai" && ctx.model.provider !== "openai-codex"))
+    return false;
   return !cfg.usage.showOnlyOnSubscriptionModels || ctx.modelRegistry.isUsingOAuth(ctx.model);
 }
 
@@ -114,7 +124,11 @@ export default function betterOpenAI(pi: ExtensionAPI): void {
   function persist(nextConfig: ResolvedConfig): void {
     cachedConfig = { ...nextConfig, active, desiredActive };
     if (!nextConfig.persistState) return;
-    writeConfig(nextConfig.configPath, { ...readRawConfig(nextConfig.configPath), active, desiredActive });
+    writeConfig(nextConfig.configPath, {
+      ...readRawConfig(nextConfig.configPath),
+      active,
+      desiredActive,
+    });
   }
 
   function applyDesiredFastState(ctx: ExtensionContext, cfg = config(ctx)): void {
@@ -128,13 +142,20 @@ export default function betterOpenAI(pi: ExtensionAPI): void {
     persist(nextConfig);
     updateFooter(ctx);
     if (next && !active) {
-      ctx.ui.notify(`Fast mode requested, but ${currentModelKey(ctx)} is unsupported. It will activate automatically when you switch to a supported model: ${modelList(nextConfig.supportedModels)}.`, "warning");
+      ctx.ui.notify(
+        `Fast mode requested, but ${currentModelKey(ctx)} is unsupported. It will activate automatically when you switch to a supported model: ${modelList(nextConfig.supportedModels)}.`,
+        "warning",
+      );
       return;
     }
     ctx.ui.notify(stateText(ctx, desiredActive, active, nextConfig.supportedModels), "info");
   }
 
-  async function refreshUsage(ctx: ExtensionContext, modelId = ctx.model?.id, options?: { notify?: boolean }): Promise<void> {
+  async function refreshUsage(
+    ctx: ExtensionContext,
+    modelId = ctx.model?.id,
+    options?: { notify?: boolean },
+  ): Promise<void> {
     if (shuttingDown || !ctx.hasUI) return;
     if (usageRefreshInFlight) {
       queuedUsageRefresh = { ctx, modelId, notify: queuedUsageRefresh?.notify || options?.notify };
@@ -164,7 +185,8 @@ export default function betterOpenAI(pi: ExtensionAPI): void {
       usageUpdatedAt = usageSnapshot ? Date.now() : undefined;
       usageError = data ? undefined : `Missing openai-codex OAuth credentials in ${AUTH_FILE}.`;
       if (!shuttingDown) updateFooter(ctx);
-      if (!shuttingDown && options?.notify) ctx.ui.notify(formatUsageStatus(ctx), usageSnapshot ? "info" : "warning");
+      if (!shuttingDown && options?.notify)
+        ctx.ui.notify(formatUsageStatus(ctx), usageSnapshot ? "info" : "warning");
     } catch (error) {
       if (shuttingDown) return;
       usageError = error instanceof Error ? error.message : String(error);
@@ -216,25 +238,27 @@ export default function betterOpenAI(pi: ExtensionAPI): void {
       `Last successful update: ${usageUpdatedAt ? new Date(usageUpdatedAt).toLocaleTimeString() : "never"}`,
       `Last error: ${usageError ?? "none"}`,
       `Refresh interval: ${cfg.usage.refreshIntervalMs}ms`,
-      `Endpoint: https://chatgpt.com/backend-api/wham/usage`
+      `Endpoint: https://chatgpt.com/backend-api/wham/usage`,
     ].join("\n");
   }
 
   function formatUsageStatus(ctx: ExtensionContext): string {
     const cfg = config(ctx);
     if (!cfg.usage.enabled) return "Usage display is disabled.";
-    if (!isOpenAISubscriptionModel(ctx, cfg)) return "Usage hidden: current model is not an OpenAI subscription model.";
+    if (!isOpenAISubscriptionModel(ctx, cfg))
+      return "Usage hidden: current model is not an OpenAI subscription model.";
     if (!usageSnapshot) return `Usage unavailable${usageError ? `: ${usageError}` : "."}`;
-    const stale = usageUpdatedAt && Date.now() - usageUpdatedAt > cfg.usage.refreshIntervalMs * 2
-      ? ` | stale ${formatResetCountdown((Date.now() - usageUpdatedAt) / 1000)}`
-      : "";
+    const stale =
+      usageUpdatedAt && Date.now() - usageUpdatedAt > cfg.usage.refreshIntervalMs * 2
+        ? ` | stale ${formatResetCountdown((Date.now() - usageUpdatedAt) / 1000)}`
+        : "";
     return `${formatUsageSnapshot(usageSnapshot, cfg.usage)}${stale}`;
   }
 
   pi.registerFlag(FLAG, {
     description: "Start with OpenAI fast mode enabled (service_tier=priority)",
     type: "boolean",
-    default: false
+    default: false,
   });
 
   function formatDebugStatus(ctx: ExtensionContext): string {
@@ -247,10 +271,12 @@ export default function betterOpenAI(pi: ExtensionAPI): void {
       `Configured service_tier: ${SERVICE_TIER}`,
       `Last injected: ${lastInjectedAt ? `${new Date(lastInjectedAt).toLocaleTimeString()} (${lastInjectedModel}, ${lastInjectedTier})` : "never"}`,
       `Footer mode: ${cfg.footer.mode}`,
-      `Usage enabled: ${cfg.usage.enabled}`,
+      "",
+      formatUsageDebug(ctx),
+      "",
       `Image enabled: ${cfg.image.enabled}`,
       `Image default save: ${cfg.image.defaultSave}`,
-      `Config: ${cfg.configPath}`
+      `Config: ${cfg.configPath}`,
     ].join("\n");
   }
 
@@ -265,14 +291,14 @@ export default function betterOpenAI(pi: ExtensionAPI): void {
       const arg = args.trim().toLowerCase();
       if (!arg) return setActive(ctx, !desiredActive);
       ctx.ui.notify("Usage: /fast", "error");
-    }
+    },
   });
 
   pi.registerCommand(OPENAI_STATUS_COMMAND, {
     description: "Show OpenAI subscription usage status",
     handler: async (_args, ctx) => {
       ctx.ui.notify(formatOpenAIStatus(ctx), "info");
-    }
+    },
   });
 
   function textPanel(title: string, lines: string[], done: () => void) {
@@ -284,27 +310,124 @@ export default function betterOpenAI(pi: ExtensionAPI): void {
       invalidate() {},
       handleInput(data: string) {
         if (data.includes("\x1b") || data === "escape" || data === "q" || data === "\x03") done();
-      }
+      },
     };
   }
 
   function buildSettingsItems(ctx: ExtensionContext, cfg: ResolvedConfig): SettingsPickerItem[] {
     return [
-      { id: "fast.enabled", label: "Fast mode", currentValue: String(desiredActive), values: ["true", "false"], description: `Request OpenAI fast mode. Activates for supported models: ${modelList(cfg.supportedModels)}.` },
-      { id: "persistState", label: "Persist fast state", currentValue: String(cfg.persistState), values: ["true", "false"], description: "Remember fast-mode state across sessions." },
-      { id: "footer.mode", label: "Footer mode", currentValue: cfg.footer.mode, values: [...FOOTER_MODES], description: "replace = custom footer, status = pi footer plus status line, off = no Better OpenAI footer/status." },
-      { id: "usage.enabled", label: "Usage display", currentValue: String(cfg.usage.enabled), values: ["true", "false"], description: "Fetch and display OpenAI subscription usage windows." },
-      { id: "usage.refreshIntervalMs", label: "Usage refresh", currentValue: String(cfg.usage.refreshIntervalMs), values: ["15000", "30000", "60000", "120000", "300000", "600000"], description: "Usage refresh interval in milliseconds." },
-      { id: "usage.showOnlyOnSubscriptionModels", label: "Usage only on OAuth", currentValue: String(cfg.usage.showOnlyOnSubscriptionModels), values: ["true", "false"], description: "Only show usage when the current OpenAI model uses subscription/OAuth auth." },
-      { id: "usage.showResetTimes", label: "Usage reset times", currentValue: String(cfg.usage.showResetTimes), values: ["true", "false"], description: "Include compact reset countdowns and local reset times." },
-      { id: "image.enabled", label: "Image tool", currentValue: String(cfg.image.enabled), values: ["true", "false"], description: "Allow the openai_image tool to make image requests." },
-      { id: "image.defaultModel", label: "Image model", currentValue: cfg.image.defaultModel, values: ["gpt-5.5", "gpt-5.4", "gpt-5.2", "gpt-5"], description: "Mainline model used for image generation when current model is not openai-codex." },
-      { id: "image.defaultSave", label: "Image save", currentValue: cfg.image.defaultSave, values: [...IMAGE_SAVE_MODES], description: "Where generated images are saved by default." },
-      { id: "image.outputFormat", label: "Image format", currentValue: cfg.image.outputFormat, values: [...IMAGE_OUTPUT_FORMATS], description: "Generated image file format." },
-      { id: "image.timeoutMs", label: "Image timeout", currentValue: String(cfg.image.timeoutMs), values: ["30000", "60000", "120000", "180000", "300000"], description: "Image request timeout in milliseconds." },
-      { id: "debug", label: "Debug info", currentValue: "open", description: "Show Better OpenAI diagnostics.", submenu: (_value, done) => textPanel("Debug info", formatDebugStatus(ctx).split("\n"), () => done()) },
-      { id: "config.path", label: "Config path", currentValue: cfg.configPath, description: `Project: ${cfg.projectConfigPath}\nGlobal: ${cfg.globalConfigPath}` },
-      { id: "config.print", label: "Print config", currentValue: "open", description: "Show the selected raw config JSON.", submenu: (_value, done) => textPanel("Config", JSON.stringify(readRawConfig(cfg.configPath), null, 2).split("\n"), () => done()) }
+      {
+        id: "fast.enabled",
+        label: "Fast mode",
+        currentValue: String(desiredActive),
+        values: ["true", "false"],
+        description: `Request OpenAI fast mode. Activates for supported models: ${modelList(cfg.supportedModels)}.`,
+      },
+      {
+        id: "persistState",
+        label: "Persist fast state",
+        currentValue: String(cfg.persistState),
+        values: ["true", "false"],
+        description: "Remember fast-mode state across sessions.",
+      },
+      {
+        id: "footer.mode",
+        label: "Footer mode",
+        currentValue: cfg.footer.mode,
+        values: [...FOOTER_MODES],
+        description:
+          "replace = custom footer, status = pi footer plus status line, off = no Better OpenAI footer/status.",
+      },
+      {
+        id: "usage.enabled",
+        label: "Usage display",
+        currentValue: String(cfg.usage.enabled),
+        values: ["true", "false"],
+        description: "Fetch and display OpenAI subscription usage windows.",
+      },
+      {
+        id: "usage.refreshIntervalMs",
+        label: "Usage refresh",
+        currentValue: String(cfg.usage.refreshIntervalMs),
+        values: ["15000", "30000", "60000", "120000", "300000", "600000"],
+        description: "Usage refresh interval in milliseconds.",
+      },
+      {
+        id: "usage.showOnlyOnSubscriptionModels",
+        label: "Usage only on OAuth",
+        currentValue: String(cfg.usage.showOnlyOnSubscriptionModels),
+        values: ["true", "false"],
+        description: "Only show usage when the current OpenAI model uses subscription/OAuth auth.",
+      },
+      {
+        id: "usage.showResetTimes",
+        label: "Usage reset times",
+        currentValue: String(cfg.usage.showResetTimes),
+        values: ["true", "false"],
+        description: "Include compact reset countdowns and local reset times.",
+      },
+      {
+        id: "image.enabled",
+        label: "Image tool",
+        currentValue: String(cfg.image.enabled),
+        values: ["true", "false"],
+        description: "Allow the openai_image tool to make image requests.",
+      },
+      {
+        id: "image.defaultModel",
+        label: "Image model",
+        currentValue: cfg.image.defaultModel,
+        values: ["gpt-5.5", "gpt-5.4", "gpt-5.2", "gpt-5"],
+        description:
+          "Mainline model used for image generation when current model is not openai-codex.",
+      },
+      {
+        id: "image.defaultSave",
+        label: "Image save",
+        currentValue: cfg.image.defaultSave,
+        values: [...IMAGE_SAVE_MODES],
+        description: "Where generated images are saved by default.",
+      },
+      {
+        id: "image.outputFormat",
+        label: "Image format",
+        currentValue: cfg.image.outputFormat,
+        values: [...IMAGE_OUTPUT_FORMATS],
+        description: "Generated image file format.",
+      },
+      {
+        id: "image.timeoutMs",
+        label: "Image timeout",
+        currentValue: String(cfg.image.timeoutMs),
+        values: ["30000", "60000", "120000", "180000", "300000"],
+        description: "Image request timeout in milliseconds.",
+      },
+      {
+        id: "debug",
+        label: "Debug info",
+        currentValue: "open",
+        description: "Show Better OpenAI diagnostics.",
+        submenu: (_value, done) =>
+          textPanel("Debug info", formatDebugStatus(ctx).split("\n"), () => done()),
+      },
+      {
+        id: "config.path",
+        label: "Config path",
+        currentValue: cfg.configPath,
+        description: `Project: ${cfg.projectConfigPath}\nGlobal: ${cfg.globalConfigPath}`,
+      },
+      {
+        id: "config.print",
+        label: "Print config",
+        currentValue: "open",
+        description: "Show the selected raw config JSON.",
+        submenu: (_value, done) =>
+          textPanel(
+            "Config",
+            JSON.stringify(readRawConfig(cfg.configPath), null, 2).split("\n"),
+            () => done(),
+          ),
+      },
     ];
   }
 
@@ -333,7 +456,14 @@ export default function betterOpenAI(pi: ExtensionAPI): void {
     } else if (id.startsWith("image.")) {
       const image = isRecord(current.image) ? current.image : {};
       const key = id.slice("image.".length);
-      image[key] = key === "timeoutMs" ? num : rawValue === "true" ? true : rawValue === "false" ? false : rawValue;
+      image[key] =
+        key === "timeoutMs"
+          ? num
+          : rawValue === "true"
+            ? true
+            : rawValue === "false"
+              ? false
+              : rawValue;
       current.image = image;
     }
     writeConfig(cfg.configPath, current);
@@ -353,37 +483,51 @@ export default function betterOpenAI(pi: ExtensionAPI): void {
   async function showSettingsPicker(ctx: ExtensionContext): Promise<void> {
     const [{ getSettingsListTheme }, { Container, SettingsList }] = await Promise.all([
       import("@mariozechner/pi-coding-agent"),
-      import("@mariozechner/pi-tui")
+      import("@mariozechner/pi-tui"),
     ]);
     await ctx.ui.custom((tui, theme, _kb, done) => {
       const container = new Container();
-      container.addChild(new (class {
-        render(_width: number) {
-          const cfg = config(ctx);
-          return [theme.fg("accent", theme.bold("Better OpenAI Settings")), theme.fg("dim", cfg.configPath), ""];
-        }
-        invalidate() {}
-      })());
+      container.addChild(
+        new (class {
+          render(_width: number) {
+            const cfg = config(ctx);
+            return [
+              theme.fg("accent", theme.bold("Better OpenAI Settings")),
+              theme.fg("dim", cfg.configPath),
+              "",
+            ];
+          }
+          invalidate() {}
+        })(),
+      );
       const settingsList = new SettingsList(
         buildSettingsItems(ctx, refresh(ctx)),
         13,
         getSettingsListTheme(),
         (id, newValue) => {
           writeSetting(ctx, id, newValue);
-          settingsList.updateValue(id, buildSettingsItems(ctx, config(ctx)).find((item) => item.id === id)?.currentValue ?? newValue);
+          settingsList.updateValue(
+            id,
+            buildSettingsItems(ctx, config(ctx)).find((item) => item.id === id)?.currentValue ??
+              newValue,
+          );
           tui.requestRender();
         },
         () => done(undefined),
-        { enableSearch: true }
+        { enableSearch: true },
       );
       container.addChild(settingsList);
       return {
-        render(width: number) { return container.render(width); },
-        invalidate() { container.invalidate(); },
+        render(width: number) {
+          return container.render(width);
+        },
+        invalidate() {
+          container.invalidate();
+        },
         handleInput(data: string) {
           settingsList.handleInput(data);
           tui.requestRender();
-        }
+        },
       };
     });
   }
@@ -392,9 +536,8 @@ export default function betterOpenAI(pi: ExtensionAPI): void {
     description: "Open Better OpenAI settings picker",
     handler: async (_args, ctx) => {
       await showSettingsPicker(ctx);
-    }
+    },
   });
-
 
   registerOpenAIImage(pi, config);
 
@@ -438,18 +581,24 @@ export default function betterOpenAI(pi: ExtensionAPI): void {
           if (totalCacheWrite) parts.push(`W${formatTokens(totalCacheWrite)}`);
 
           const usingSubscription = ctx.model ? ctx.modelRegistry.isUsingOAuth(ctx.model) : false;
-          if (totalCost || usingSubscription) parts.push(`$${totalCost.toFixed(3)}${usingSubscription ? " (sub)" : ""}`);
+          if (totalCost || usingSubscription)
+            parts.push(`$${totalCost.toFixed(3)}${usingSubscription ? " (sub)" : ""}`);
 
           const contextUsage = ctx.getContextUsage();
           const contextWindow = contextUsage?.contextWindow ?? ctx.model?.contextWindow ?? 0;
           const contextPercentValue = contextUsage?.percent ?? 0;
-          const contextPercent = contextUsage?.percent !== null ? contextPercentValue.toFixed(1) : "?";
-          const contextDisplay = contextPercent === "?" ? `?/${formatTokens(contextWindow)} (auto)` : `${contextPercent}%/${formatTokens(contextWindow)} (auto)`;
-          const contextText = contextPercentValue > 90
-            ? theme.fg("error", contextDisplay)
-            : contextPercentValue > 70
-              ? theme.fg("warning", contextDisplay)
-              : contextDisplay;
+          const contextPercent =
+            contextUsage?.percent !== null ? contextPercentValue.toFixed(1) : "?";
+          const contextDisplay =
+            contextPercent === "?"
+              ? `?/${formatTokens(contextWindow)} (auto)`
+              : `${contextPercent}%/${formatTokens(contextWindow)} (auto)`;
+          const contextText =
+            contextPercentValue > 90
+              ? theme.fg("error", contextDisplay)
+              : contextPercentValue > 70
+                ? theme.fg("warning", contextDisplay)
+                : contextDisplay;
           parts.push(contextText);
 
           let usageLine: string | undefined;
@@ -467,12 +616,14 @@ export default function betterOpenAI(pi: ExtensionAPI): void {
 
           const modelName = ctx.model?.id || "no-model";
           const thinkingLevel = pi.getThinkingLevel();
-          const fastSuffix = active && supportsFast(ctx, config(ctx).supportedModels) ? " fast" : "";
+          const fastSuffix =
+            active && supportsFast(ctx, config(ctx).supportedModels) ? " fast" : "";
           let rightWithoutProvider = modelName;
           if (ctx.model?.reasoning) {
-            rightWithoutProvider = thinkingLevel === "off"
-              ? `${modelName}${fastSuffix} • thinking off`
-              : `${modelName}${fastSuffix} • ${thinkingLevel}`;
+            rightWithoutProvider =
+              thinkingLevel === "off"
+                ? `${modelName}${fastSuffix} • thinking off`
+                : `${modelName}${fastSuffix} • ${thinkingLevel}`;
           } else if (fastSuffix) {
             rightWithoutProvider = `${modelName}${fastSuffix}`;
           }
@@ -492,7 +643,10 @@ export default function betterOpenAI(pi: ExtensionAPI): void {
             const availableForRight = width - statsLeftWidth - 2;
             if (availableForRight > 0) {
               const truncatedRight = truncateToWidth(rightSide, availableForRight, "");
-              statsLine = statsLeft + " ".repeat(Math.max(0, width - statsLeftWidth - visibleWidth(truncatedRight))) + truncatedRight;
+              statsLine =
+                statsLeft +
+                " ".repeat(Math.max(0, width - statsLeftWidth - visibleWidth(truncatedRight))) +
+                truncatedRight;
             } else {
               statsLine = statsLeft;
             }
@@ -500,7 +654,7 @@ export default function betterOpenAI(pi: ExtensionAPI): void {
 
           const lines = [
             truncateToWidth(theme.fg("dim", pwd), width, theme.fg("dim", "...")),
-            theme.fg("dim", statsLeft) + theme.fg("dim", statsLine.slice(statsLeft.length))
+            theme.fg("dim", statsLeft) + theme.fg("dim", statsLine.slice(statsLeft.length)),
           ];
 
           if (usageLine) {
@@ -517,7 +671,7 @@ export default function betterOpenAI(pi: ExtensionAPI): void {
           }
 
           return lines;
-        }
+        },
       };
     });
   }
@@ -536,8 +690,14 @@ export default function betterOpenAI(pi: ExtensionAPI): void {
       ctx.ui.setStatus(STATUS_KEY, undefined);
       return;
     }
-    const fast = active && supportsFast(ctx, cfg.supportedModels) ? `${ctx.model?.id ?? "model"} fast` : undefined;
-    const usage = usageSnapshot && cfg.usage.enabled && isOpenAISubscriptionModel(ctx, cfg) ? formatUsageSnapshot(usageSnapshot, cfg.usage) : undefined;
+    const fast =
+      active && supportsFast(ctx, cfg.supportedModels)
+        ? `${ctx.model?.id ?? "model"} fast`
+        : undefined;
+    const usage =
+      usageSnapshot && cfg.usage.enabled && isOpenAISubscriptionModel(ctx, cfg)
+        ? formatUsageSnapshot(usageSnapshot, cfg.usage)
+        : undefined;
     ctx.ui.setStatus(STATUS_KEY, [fast, usage].filter(Boolean).join(" | ") || undefined);
   }
 
@@ -546,14 +706,19 @@ export default function betterOpenAI(pi: ExtensionAPI): void {
     desiredActive = nextConfig.persistState ? nextConfig.desiredActive : false;
     if (pi.getFlag(FLAG) === true) desiredActive = true;
     applyDesiredFastState(ctx, nextConfig);
-    if (desiredActive !== nextConfig.desiredActive || active !== nextConfig.active) persist(nextConfig);
+    if (desiredActive !== nextConfig.desiredActive || active !== nextConfig.active)
+      persist(nextConfig);
     if (desiredActive && !active) {
-      ctx.ui.notify(`Fast mode requested, but ${currentModelKey(ctx)} is unsupported. It will activate automatically when you switch to a supported model: ${modelList(nextConfig.supportedModels)}.`, "warning");
+      ctx.ui.notify(
+        `Fast mode requested, but ${currentModelKey(ctx)} is unsupported. It will activate automatically when you switch to a supported model: ${modelList(nextConfig.supportedModels)}.`,
+        "warning",
+      );
     }
     refreshFooterTotals(ctx);
     updateFooter(ctx);
     startUsageRefresh(ctx);
-    if (active) ctx.ui.notify(stateText(ctx, desiredActive, active, nextConfig.supportedModels), "info");
+    if (active)
+      ctx.ui.notify(stateText(ctx, desiredActive, active, nextConfig.supportedModels), "info");
   });
 
   pi.on("turn_end", (_event, ctx) => {
@@ -578,7 +743,12 @@ export default function betterOpenAI(pi: ExtensionAPI): void {
     applyDesiredFastState(ctx, cfg);
     if (active !== wasActive) {
       persist(cfg);
-      ctx.ui.notify(active ? stateText(ctx, desiredActive, active, cfg.supportedModels) : `Fast mode inactive for unsupported model ${currentModelKey(ctx)}.`, active ? "info" : "warning");
+      ctx.ui.notify(
+        active
+          ? stateText(ctx, desiredActive, active, cfg.supportedModels)
+          : `Fast mode inactive for unsupported model ${currentModelKey(ctx)}.`,
+        active ? "info" : "warning",
+      );
     }
     updateFooter(ctx);
     void refreshUsage(ctx, event.model.id);
@@ -595,7 +765,8 @@ export default function betterOpenAI(pi: ExtensionAPI): void {
 
   pi.on("before_provider_request", (event, ctx) => {
     const nextConfig = config(ctx);
-    if (!active || !supportsFast(ctx, nextConfig.supportedModels) || !isRecord(event.payload)) return;
+    if (!active || !supportsFast(ctx, nextConfig.supportedModels) || !isRecord(event.payload))
+      return;
     lastInjectedAt = Date.now();
     lastInjectedModel = currentModelKey(ctx);
     lastInjectedTier = SERVICE_TIER;
@@ -620,5 +791,5 @@ export const _test = {
   formatPercent,
   formatUsageSnapshot,
   readCodexAuth,
-  imageTest: _imageTest
+  imageTest: _imageTest,
 };

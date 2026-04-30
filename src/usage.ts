@@ -61,7 +61,10 @@ export function formatResetCountdown(seconds: number | null): string | null {
   return `${secs}s`;
 }
 
-function formatResetClock(seconds: number | null, options?: { includeDate?: boolean }): string | null {
+function formatResetClock(
+  seconds: number | null,
+  options?: { includeDate?: boolean },
+): string | null {
   if (typeof seconds !== "number" || Number.isNaN(seconds)) return null;
   const resetDate = new Date(Date.now() + Math.max(0, seconds) * 1000);
   const now = new Date();
@@ -73,7 +76,11 @@ function formatResetClock(seconds: number | null, options?: { includeDate?: bool
   return `${weekday} ${date} ${time}`;
 }
 
-function formatCompactReset(label: string, seconds: number | null, options?: { includeDate?: boolean }): string | null {
+function formatCompactReset(
+  label: string,
+  seconds: number | null,
+  options?: { includeDate?: boolean },
+): string | null {
   const countdown = formatResetCountdown(seconds);
   const clock = formatResetClock(seconds, options);
   return countdown && clock ? `${label} ↺ ${countdown} - ${clock}` : null;
@@ -81,7 +88,16 @@ function formatCompactReset(label: string, seconds: number | null, options?: { i
 
 export function readCodexAuth(): { accessToken: string; accountId: string } | undefined {
   try {
-    const auth = JSON.parse(readFileSync(AUTH_FILE, "utf8")) as Record<string, { type?: string; access?: string | null; accountId?: string | null; account_id?: string | null } | undefined>;
+    const auth = JSON.parse(readFileSync(AUTH_FILE, "utf8")) as Record<
+      string,
+      | {
+          type?: string;
+          access?: string | null;
+          accountId?: string | null;
+          account_id?: string | null;
+        }
+      | undefined
+    >;
     const entry = auth["openai-codex"];
     if (entry?.type !== "oauth") return undefined;
     const accessToken = entry.access?.trim();
@@ -92,16 +108,18 @@ export function readCodexAuth(): { accessToken: string; accountId: string } | un
   }
 }
 
-export async function requestCodexUsage(signal?: AbortSignal): Promise<CodexUsageResponse | undefined> {
+export async function requestCodexUsage(
+  signal?: AbortSignal,
+): Promise<CodexUsageResponse | undefined> {
   const credentials = readCodexAuth();
   if (!credentials) return undefined;
   const response = await fetch(USAGE_URL, {
     headers: {
       accept: "*/*",
       authorization: `Bearer ${credentials.accessToken}`,
-      "chatgpt-account-id": credentials.accountId
+      "chatgpt-account-id": credentials.accountId,
     },
-    signal
+    signal,
   });
   if (!response.ok) throw new Error(`Codex usage request failed (${response.status})`);
   return (await response.json()) as CodexUsageResponse;
@@ -110,7 +128,15 @@ export async function requestCodexUsage(signal?: AbortSignal): Promise<CodexUsag
 function normalizeRateLimitBucket(value: unknown): RateLimitBucket | null {
   const record = asObject(value);
   if (!record) return null;
-  if (!("primary_window" in record || "secondary_window" in record || "limit_reached" in record || "allowed" in record)) return null;
+  if (
+    !(
+      "primary_window" in record ||
+      "secondary_window" in record ||
+      "limit_reached" in record ||
+      "allowed" in record
+    )
+  )
+    return null;
   return record as RateLimitBucket;
 }
 
@@ -140,34 +166,47 @@ function findSparkRateLimitBucket(data: CodexUsageResponse): RateLimitBucket | n
 }
 
 function getResetSeconds(window: UsageWindow | null | undefined): number | null {
-  if (typeof window?.reset_after_seconds === "number" && !Number.isNaN(window.reset_after_seconds)) return window.reset_after_seconds;
+  if (typeof window?.reset_after_seconds === "number" && !Number.isNaN(window.reset_after_seconds))
+    return window.reset_after_seconds;
   if (typeof window?.reset_at !== "number" || Number.isNaN(window.reset_at)) return null;
-  const resetAtSeconds = window.reset_at > 100_000_000_000 ? window.reset_at / 1000 : window.reset_at;
+  const resetAtSeconds =
+    window.reset_at > 100_000_000_000 ? window.reset_at / 1000 : window.reset_at;
   return Math.max(0, resetAtSeconds - Date.now() / 1000);
 }
 
-export function parseUsageSnapshot(data: CodexUsageResponse, modelId: string | undefined): UsageSnapshot {
-  const bucket = modelId === SPARK_MODEL_ID ? findSparkRateLimitBucket(data) : normalizeRateLimitBucket(data.rate_limit);
+export function parseUsageSnapshot(
+  data: CodexUsageResponse,
+  modelId: string | undefined,
+): UsageSnapshot {
+  const bucket =
+    modelId === SPARK_MODEL_ID
+      ? findSparkRateLimitBucket(data)
+      : normalizeRateLimitBucket(data.rate_limit);
   return {
     fiveHourLeftPercent: usedToLeftPercent(bucket?.primary_window?.used_percent),
     sevenDayLeftPercent: usedToLeftPercent(bucket?.secondary_window?.used_percent),
     fiveHourResetInSeconds: getResetSeconds(bucket?.primary_window),
     sevenDayResetInSeconds: getResetSeconds(bucket?.secondary_window),
-    isLimited: bucket?.limit_reached === true || bucket?.allowed === false
+    isLimited: bucket?.limit_reached === true || bucket?.allowed === false,
   };
 }
 
 export function formatPercent(value: number | null): string {
-  return typeof value === "number" && !Number.isNaN(value) ? `${Math.round(clampPercent(value))}%` : "--";
+  return typeof value === "number" && !Number.isNaN(value)
+    ? `${Math.round(clampPercent(value))}%`
+    : "--";
 }
 
-export function formatUsageSnapshot(snapshot: UsageSnapshot, options: { showResetTimes: boolean }): string {
+export function formatUsageSnapshot(
+  snapshot: UsageSnapshot,
+  options: { showResetTimes: boolean },
+): string {
   const fiveHour = formatPercent(snapshot.fiveHourLeftPercent);
   const sevenDay = formatPercent(snapshot.sevenDayLeftPercent);
   const resets = options.showResetTimes
     ? [
         formatCompactReset("5h", snapshot.fiveHourResetInSeconds),
-        formatCompactReset("7d", snapshot.sevenDayResetInSeconds, { includeDate: true })
+        formatCompactReset("7d", snapshot.sevenDayResetInSeconds, { includeDate: true }),
       ].filter((value): value is string => value !== null)
     : [];
   return `Usage: 5h: ${fiveHour} | 7d: ${sevenDay}${resets.length ? ` | ${resets.join(" | ")}` : ""}`;

@@ -24,11 +24,39 @@ assert.equal(_test.formatPercent(99.4), "99%");
 assert.equal(_test.formatPercent(null), "--");
 assert.equal(_test.imageTest.OPENAI_IMAGE_TOOL, "openai_image");
 assert.equal(_test.imageTest.imageMimeType("x.jpg"), "image/jpeg");
-assert.equal(_test.imageTest.displayPath(join(process.env.HOME, "dev", "image.png")), "~/dev/image.png");
-assert.equal(_test.imageTest.latestUserPromptFromEntries([{ type: "message", message: { role: "user", content: "draw a dog" } }]), "draw a dog");
-assert.deepEqual(_test.imageTest.dataUrlParts("data:image/png;base64,Zm9v", "image/png"), { data: "Zm9v", mimeType: "image/png" });
-assert.equal(_test.imageTest.extractImageFromEvent({ type: "response.output_item.done", item: { type: "image_generation_call", id: "ig_1", status: "completed", result: "Zm9v" } }, "image/png").data, "Zm9v");
-assert.deepEqual(_test.imageTest.buildRequest({ prompt: "draw an otter" }, "gpt-5.5", { image: _test.DEFAULT_IMAGE_CONFIG }, []).tool_choice, { type: "image_generation" });
+assert.equal(
+  _test.imageTest.displayPath(join(process.env.HOME, "dev", "image.png")),
+  "~/dev/image.png",
+);
+assert.equal(
+  _test.imageTest.latestUserPromptFromEntries([
+    { type: "message", message: { role: "user", content: "draw a dog" } },
+  ]),
+  "draw a dog",
+);
+assert.deepEqual(_test.imageTest.dataUrlParts("data:image/png;base64,Zm9v", "image/png"), {
+  data: "Zm9v",
+  mimeType: "image/png",
+});
+assert.equal(
+  _test.imageTest.extractImageFromEvent(
+    {
+      type: "response.output_item.done",
+      item: { type: "image_generation_call", id: "ig_1", status: "completed", result: "Zm9v" },
+    },
+    "image/png",
+  ).data,
+  "Zm9v",
+);
+assert.deepEqual(
+  _test.imageTest.buildRequest(
+    { prompt: "draw an otter" },
+    "gpt-5.5",
+    { image: _test.DEFAULT_IMAGE_CONFIG },
+    [],
+  ).tool_choice,
+  { type: "image_generation" },
+);
 
 const usage = _test.parseUsageSnapshot(
   {
@@ -43,7 +71,10 @@ const usage = _test.parseUsageSnapshot(
 assert.equal(usage.fiveHourLeftPercent, 99);
 assert.equal(usage.sevenDayLeftPercent, 51);
 assert.equal(usage.isLimited, false);
-assert.match(_test.formatUsageSnapshot(usage, { showResetTimes: false }), /^Usage: 5h: 99% \| 7d: 51%$/);
+assert.match(
+  _test.formatUsageSnapshot(usage, { showResetTimes: false }),
+  /^Usage: 5h: 99% \| 7d: 51%$/,
+);
 assert.equal(truncateToWidth("\u001b[2mabcdef\u001b[22m", 4), "\u001b[2ma...\u001b[22m");
 
 const tempDir = mkdtempSync(join(tmpdir(), "pi-better-openai-"));
@@ -67,7 +98,9 @@ try {
   assert.deepEqual(afterUsageWrite.usage, { enabled: false, unknownUsageField: 123 });
 
   const projectConfigPath = _test.configPaths(tempDir).project;
-  writeConfig(projectConfigPath, { image: { defaultSave: "global", outputFormat: "webp", timeoutMs: 1 } });
+  writeConfig(projectConfigPath, {
+    image: { defaultSave: "global", outputFormat: "webp", timeoutMs: 1 },
+  });
   const resolved = _test.resolveConfig(tempDir);
   assert.equal(resolved.image.defaultSave, "global");
   assert.equal(resolved.image.outputFormat, "webp");

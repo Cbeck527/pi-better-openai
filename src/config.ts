@@ -11,12 +11,12 @@ export const DEFAULT_SUPPORTED_MODELS = [
   "openai/gpt-5.4",
   "openai/gpt-5.5",
   "openai-codex/gpt-5.4",
-  "openai-codex/gpt-5.5"
+  "openai-codex/gpt-5.5",
 ] as const;
 
-export type FooterMode = typeof FOOTER_MODES[number];
-export type ImageSaveMode = typeof IMAGE_SAVE_MODES[number];
-export type ImageOutputFormat = typeof IMAGE_OUTPUT_FORMATS[number];
+export type FooterMode = (typeof FOOTER_MODES)[number];
+export type ImageSaveMode = (typeof IMAGE_SAVE_MODES)[number];
+export type ImageOutputFormat = (typeof IMAGE_OUTPUT_FORMATS)[number];
 
 export type UsageConfig = {
   enabled?: boolean;
@@ -71,11 +71,11 @@ export const DEFAULT_USAGE_CONFIG: Required<UsageConfig> = {
   enabled: true,
   refreshIntervalMs: 60_000,
   showOnlyOnSubscriptionModels: true,
-  showResetTimes: true
+  showResetTimes: true,
 };
 
 export const DEFAULT_FOOTER_CONFIG: Required<FooterConfig> = {
-  mode: "replace"
+  mode: "replace",
 };
 
 export const DEFAULT_IMAGE_CONFIG: Required<ImageConfig> = {
@@ -83,7 +83,7 @@ export const DEFAULT_IMAGE_CONFIG: Required<ImageConfig> = {
   defaultModel: "gpt-5.5",
   defaultSave: "project",
   outputFormat: "png",
-  timeoutMs: 180_000
+  timeoutMs: 180_000,
 };
 
 export const DEFAULT_CONFIG: ConfigFile = {
@@ -93,7 +93,7 @@ export const DEFAULT_CONFIG: ConfigFile = {
   supportedModels: [...DEFAULT_SUPPORTED_MODELS],
   usage: DEFAULT_USAGE_CONFIG,
   footer: DEFAULT_FOOTER_CONFIG,
-  image: DEFAULT_IMAGE_CONFIG
+  image: DEFAULT_IMAGE_CONFIG,
 };
 
 export function isRecord(value: unknown): value is Record<string, unknown> {
@@ -103,7 +103,7 @@ export function isRecord(value: unknown): value is Record<string, unknown> {
 export function configPaths(cwd: string, home = homedir()) {
   return {
     project: join(cwd, ".pi", "extensions", CONFIG_BASENAME),
-    global: join(home, ".pi", "agent", "extensions", CONFIG_BASENAME)
+    global: join(home, ".pi", "agent", "extensions", CONFIG_BASENAME),
   };
 }
 
@@ -129,7 +129,9 @@ export function normalizeModelKeys(value: unknown): string[] | undefined {
 export function parseModels(value: unknown): SupportedModel[] | undefined {
   const keys = normalizeModelKeys(value);
   if (keys === undefined) return undefined;
-  return keys.map((key) => parseModelKey(key)).filter((entry): entry is SupportedModel => entry !== undefined);
+  return keys
+    .map((key) => parseModelKey(key))
+    .filter((entry): entry is SupportedModel => entry !== undefined);
 }
 
 export function readRawConfig(path: string): Record<string, unknown> {
@@ -156,19 +158,35 @@ export function readConfig(path: string): ConfigFile | undefined {
   if (isRecord(parsed.usage)) {
     config.usage = {};
     if (typeof parsed.usage.enabled === "boolean") config.usage.enabled = parsed.usage.enabled;
-    if (typeof parsed.usage.refreshIntervalMs === "number") config.usage.refreshIntervalMs = parsed.usage.refreshIntervalMs;
-    if (typeof parsed.usage.showOnlyOnSubscriptionModels === "boolean") config.usage.showOnlyOnSubscriptionModels = parsed.usage.showOnlyOnSubscriptionModels;
-    if (typeof parsed.usage.showResetTimes === "boolean") config.usage.showResetTimes = parsed.usage.showResetTimes;
+    if (typeof parsed.usage.refreshIntervalMs === "number")
+      config.usage.refreshIntervalMs = parsed.usage.refreshIntervalMs;
+    if (typeof parsed.usage.showOnlyOnSubscriptionModels === "boolean")
+      config.usage.showOnlyOnSubscriptionModels = parsed.usage.showOnlyOnSubscriptionModels;
+    if (typeof parsed.usage.showResetTimes === "boolean")
+      config.usage.showResetTimes = parsed.usage.showResetTimes;
   }
-  if (isRecord(parsed.footer) && typeof parsed.footer.mode === "string" && (FOOTER_MODES as readonly string[]).includes(parsed.footer.mode)) {
+  if (
+    isRecord(parsed.footer) &&
+    typeof parsed.footer.mode === "string" &&
+    (FOOTER_MODES as readonly string[]).includes(parsed.footer.mode)
+  ) {
     config.footer = { mode: parsed.footer.mode as FooterMode };
   }
   if (isRecord(parsed.image)) {
     config.image = {};
     if (typeof parsed.image.enabled === "boolean") config.image.enabled = parsed.image.enabled;
-    if (typeof parsed.image.defaultModel === "string" && parsed.image.defaultModel.trim()) config.image.defaultModel = parsed.image.defaultModel.trim();
-    if (typeof parsed.image.defaultSave === "string" && (IMAGE_SAVE_MODES as readonly string[]).includes(parsed.image.defaultSave)) config.image.defaultSave = parsed.image.defaultSave as ImageSaveMode;
-    if (typeof parsed.image.outputFormat === "string" && (IMAGE_OUTPUT_FORMATS as readonly string[]).includes(parsed.image.outputFormat)) config.image.outputFormat = parsed.image.outputFormat as ImageOutputFormat;
+    if (typeof parsed.image.defaultModel === "string" && parsed.image.defaultModel.trim())
+      config.image.defaultModel = parsed.image.defaultModel.trim();
+    if (
+      typeof parsed.image.defaultSave === "string" &&
+      (IMAGE_SAVE_MODES as readonly string[]).includes(parsed.image.defaultSave)
+    )
+      config.image.defaultSave = parsed.image.defaultSave as ImageSaveMode;
+    if (
+      typeof parsed.image.outputFormat === "string" &&
+      (IMAGE_OUTPUT_FORMATS as readonly string[]).includes(parsed.image.outputFormat)
+    )
+      config.image.outputFormat = parsed.image.outputFormat as ImageOutputFormat;
     if (typeof parsed.image.timeoutMs === "number") config.image.timeoutMs = parsed.image.timeoutMs;
   }
   return config;
@@ -210,23 +228,40 @@ export function resolveConfig(cwd: string): ResolvedConfig {
     persistState: merged.persistState ?? true,
     active: merged.active ?? desiredActive,
     desiredActive,
-    supportedModels: parseModels(merged.supportedModels) ?? parseModels(DEFAULT_SUPPORTED_MODELS) ?? [],
+    supportedModels:
+      parseModels(merged.supportedModels) ?? parseModels(DEFAULT_SUPPORTED_MODELS) ?? [],
     usage: {
       ...DEFAULT_USAGE_CONFIG,
-      ...(globalConfig.usage ?? {}),
-      ...(projectConfig.usage ?? {}),
-      refreshIntervalMs: Math.max(15_000, Math.min(10 * 60_000, projectConfig.usage?.refreshIntervalMs ?? globalConfig.usage?.refreshIntervalMs ?? DEFAULT_USAGE_CONFIG.refreshIntervalMs))
+      ...globalConfig.usage,
+      ...projectConfig.usage,
+      refreshIntervalMs: Math.max(
+        15_000,
+        Math.min(
+          10 * 60_000,
+          projectConfig.usage?.refreshIntervalMs ??
+            globalConfig.usage?.refreshIntervalMs ??
+            DEFAULT_USAGE_CONFIG.refreshIntervalMs,
+        ),
+      ),
     },
     footer: {
       ...DEFAULT_FOOTER_CONFIG,
-      ...(globalConfig.footer ?? {}),
-      ...(projectConfig.footer ?? {})
+      ...globalConfig.footer,
+      ...projectConfig.footer,
     },
     image: {
       ...DEFAULT_IMAGE_CONFIG,
-      ...(globalConfig.image ?? {}),
-      ...(projectConfig.image ?? {}),
-      timeoutMs: Math.max(30_000, Math.min(5 * 60_000, projectConfig.image?.timeoutMs ?? globalConfig.image?.timeoutMs ?? DEFAULT_IMAGE_CONFIG.timeoutMs))
-    }
+      ...globalConfig.image,
+      ...projectConfig.image,
+      timeoutMs: Math.max(
+        30_000,
+        Math.min(
+          5 * 60_000,
+          projectConfig.image?.timeoutMs ??
+            globalConfig.image?.timeoutMs ??
+            DEFAULT_IMAGE_CONFIG.timeoutMs,
+        ),
+      ),
+    },
   };
 }

@@ -1,5 +1,10 @@
+const ANSI_ESCAPE_PATTERN = String.raw`\u001B\[[0-?]*[ -/]*[@-~]`;
+const ANSI_ESCAPE_REGEXP = new RegExp(ANSI_ESCAPE_PATTERN, "g");
+const LEADING_ANSI_ESCAPE_REGEXP = new RegExp(`^(?:${ANSI_ESCAPE_PATTERN})+`);
+const TRAILING_ANSI_ESCAPE_REGEXP = new RegExp(`(?:${ANSI_ESCAPE_PATTERN})+$`);
+
 export function stripAnsi(value: string): string {
-  return value.replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, "");
+  return value.replace(ANSI_ESCAPE_REGEXP, "");
 }
 
 export function visibleWidth(value: string): number {
@@ -7,11 +12,11 @@ export function visibleWidth(value: string): number {
 }
 
 function leadingAnsi(value: string): string {
-  return value.match(/^(?:\u001b\[[0-?]*[ -/]*[@-~])+/)?.[0] ?? "";
+  return value.match(LEADING_ANSI_ESCAPE_REGEXP)?.[0] ?? "";
 }
 
 function trailingAnsi(value: string): string {
-  return value.match(/(?:\u001b\[[0-?]*[ -/]*[@-~])+$/)?.[0] ?? "";
+  return value.match(TRAILING_ANSI_ESCAPE_REGEXP)?.[0] ?? "";
 }
 
 export function truncateToWidth(value: string, width: number, ellipsis = "..."): string {
@@ -31,5 +36,8 @@ export function formatTokens(count: number): string {
 }
 
 export function sanitizeStatusText(text: string): string {
-  return text.replace(/[\r\n\t]/g, " ").replace(/ +/g, " ").trim();
+  return text
+    .replace(/[\r\n\t]/g, " ")
+    .replace(/ +/g, " ")
+    .trim();
 }
