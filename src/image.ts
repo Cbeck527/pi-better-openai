@@ -497,7 +497,7 @@ function resolveToolPrompt(params: ToolParams, ctx: ExtensionContext): string {
 
 function resultText(result: CodexImageResult): string {
   const parts = [
-    `Generated image via openai-codex/${result.model}.`,
+    `Generated image using OpenAI image_generation tool via openai-codex/${result.model}.`,
     `Action: ${result.action}.`,
     `Prompt: ${result.prompt}`,
   ];
@@ -649,7 +649,12 @@ export function registerOpenAIImage(
       const model = resolveModel(params, ctx, cfg);
       const requestParams = { ...params, prompt: resolveToolPrompt(params, ctx) };
       onUpdate?.({
-        content: [{ type: "text", text: `Requesting OpenAI image via openai-codex/${model}...` }],
+        content: [
+          {
+            type: "text",
+            text: `Requesting OpenAI image_generation via openai-codex/${model}...`,
+          },
+        ],
         details: undefined,
       });
       const result = await generate(requestParams, ctx, signal);
